@@ -1,5 +1,5 @@
 ---
-title: Getting Started
+title: Quickstart
 description: Install the MIST.cash SDK and run your first privacy transaction.
 ---
 
@@ -148,6 +148,56 @@ The SDK supports the following tokens on Starknet mainnet:
 | Survivor | SURVIVOR | `0x5dc92...51f86` |
 
 See [`tokensData`](/packages/config#supported-tokens) in `@mistcash/config` for full addresses and metadata.
+
+## Examples
+
+### Deposit and Withdraw
+
+```typescript
+import { MistClient } from "@mistcash/sdk";
+
+const client = new MistClient({ provider, network: "mainnet" });
+
+// Deposit 0.1 ETH
+const { note } = await client.createDeposit({ token: "ETH", amount: "0.1" });
+await client.deposit(note.commitment);
+
+// Later: withdraw to a new address
+await client.withdraw({ note: note.secret, recipient: recipientAddress });
+```
+
+### Partial Withdrawal
+
+```typescript
+// Withdraw only 0.03 ETH, keep 0.07 ETH shielded
+const { remainingNote } = await client.partialWithdraw({
+  note: originalNote,
+  amount: "0.03",
+  recipient: recipientAddress,
+});
+
+// remainingNote can be used for future withdrawals
+```
+
+### Using a Relayer
+
+```typescript
+const client = new MistClient({
+  provider,
+  network: "mainnet",
+  relayerUrl: "https://relayer.mistcash.example",
+});
+
+// Withdrawals will be submitted via the relayer
+await client.withdraw({ note, recipient: freshAddress });
+```
+
+### Checking Deposit Status
+
+```typescript
+const status = await client.getDepositStatus(commitment);
+console.log(status); // { deposited: true, withdrawn: false, timestamp: 1700000000 }
+```
 
 ## Next Steps
 

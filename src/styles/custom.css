@@ -1,28 +1,68 @@
-/* Custom styles for MIST.cash SDK docs */
+/* Custom styles for MIST.cash docs */
 
 :root {
-  --sl-color-accent-low: #1a1a2e;
-  --sl-color-accent: #6c63ff;
-  --sl-color-accent-high: #c4c1ff;
+  --sl-color-accent-low: #1a1a1a;
+  --sl-color-accent: #888888;
+  --sl-color-accent-high: #d4d4d4;
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #eceef2;
-  --sl-color-gray-2: #c0c2c7;
-  --sl-color-gray-3: #888b96;
-  --sl-color-gray-4: #545861;
-  --sl-color-gray-5: #353841;
-  --sl-color-gray-6: #24272f;
-  --sl-color-black: #17181c;
+  --sl-color-gray-1: #eeeeee;
+  --sl-color-gray-2: #c0c0c0;
+  --sl-color-gray-3: #888888;
+  --sl-color-gray-4: #545454;
+  --sl-color-gray-5: #353535;
+  --sl-color-gray-6: #242424;
+  --sl-color-black: #171717;
   --sl-font-system: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 }
 
 :root[data-theme="light"] {
-  --sl-color-accent-low: #e8e6ff;
-  --sl-color-accent: #5b52e0;
-  --sl-color-accent-high: #2a2366;
+  --sl-color-accent-low: #e8e8e8;
+  --sl-color-accent: #555555;
+  --sl-color-accent-high: #222222;
 }
 
 /* Code block styling */
 .expressive-code pre {
   border-radius: 0.5rem;
+}
+
+/* Sidebar: always expanded, disable collapse interaction */
+.top-level > li > details {
+  pointer-events: auto;
+}
+
+.top-level > li > details > summary {
+  pointer-events: none;
+  list-style: none;
+  cursor: default;
+}
+
+.top-level > li > details > summary::marker,
+.top-level > li > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Hide the caret/arrow icon */
+.top-level > li > details > summary svg.caret {
+  display: none;
+}
+
+/* Re-enable pointer events on the child links */
+.top-level > li > details > ul {
+  pointer-events: auto;
+}
+
+/* Sidebar group titles: uppercase, smaller */
+.top-level > li > details > summary .group-label span.large {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* Make top-level standalone links (e.g. Welcome) match normal sub-link style */
+.top-level > li > a.large {
+  font-size: var(--sl-text-sm);
+  font-weight: normal;
 }
