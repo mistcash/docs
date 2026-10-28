@@ -21,3 +21,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      # Internal links only (external URLs skipped to avoid flaky runs).
+      # favicon.svg is skipped: Starlight's default /favicon.svg is missing
+      # (no public/ dir) -- TODO add a favicon and drop this skip.
+      - run: npm run linkcheck
