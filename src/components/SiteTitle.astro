@@ -1,0 +1,42 @@
+---
+// Header title: the landing's wordmark with "Docs" beside it. The wordmark is
+// the light variant, which is what the landing header uses on midnight.
+import logo from "../assets/mist.cash-light.svg";
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="mist-site-title" aria-label={siteTitle}>
+  <img src={logo.src} alt="" width="160" height="27" />
+  <span class="mist-site-title__docs" aria-hidden="true">Docs</span>
+</a>
+
+<style>
+  .mist-site-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.875rem;
+    text-decoration: none;
+    color: var(--mist-fg);
+    white-space: nowrap;
+  }
+  img {
+    height: 1.375rem;
+    width: auto;
+    display: block;
+  }
+  .mist-site-title__docs {
+    padding-left: 0.875rem;
+    border-left: 1px solid var(--mist-line-strong);
+    font-family: var(--mist-font-text);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--mist-fg-2);
+  }
+  @media (min-width: 72rem) {
+    img {
+      height: 1.5rem;
+    }
+  }
+</style>

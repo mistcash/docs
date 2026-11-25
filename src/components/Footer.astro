@@ -1,0 +1,11 @@
+---
+// The stock footer (edit link, last updated, pagination) with the record
+// strip beneath it, which closes every page as it does on the landing.
+import Default from "@astrojs/starlight/components/Footer.astro";
+import RecordStrip from "./RecordStrip.astro";
+---
+
+<Default {...Astro.props}><slot /></Default>
+<div class="mist-footer-record">
+  <RecordStrip />
+</div>

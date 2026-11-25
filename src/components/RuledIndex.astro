@@ -1,0 +1,25 @@
+---
+// An index of ruled rows (the landing's blog-index pattern), for pages that
+// point at their children. Each row: a title, one sentence, a drawn arrow.
+// Use instead of a grid of cards.
+import Icon from "./Icon.astro";
+
+interface Props {
+  items: { href: string; title: string; body: string }[];
+}
+const { items } = Astro.props;
+---
+
+<ul class="mist-index not-content">
+  {
+    items.map((item) => (
+      <li>
+        <a href={item.href}>
+          <span class="mist-index__title">{item.title}</span>
+          <span class="mist-index__body">{item.body}</span>
+          <Icon name="arrow-right" size={20} />
+        </a>
+      </li>
+    ))
+  }
+</ul>

@@ -1,0 +1,220 @@
+/* MIST.cash docs: design tokens.
+ *
+ * Mirrors landing/DESIGN.md and landing/src/app/globals.css. Three colours
+ * carry the brand (midnight, azure, coral) and every neutral is a tint of
+ * them, so nothing here introduces a fourth hue. Starlight's variables are
+ * mapped onto these tokens at the bottom, which is what restyles the
+ * stock components.
+ *
+ * Dark mode is the landing's midnight surface. Light mode is its fog reading
+ * surface. The header is midnight in both, as it is on the landing.
+ */
+
+@font-face {
+  font-family: "Josefin Sans";
+  src: url("/fonts/JosefinSans-Variable-latin.woff2") format("woff2");
+  font-weight: 100 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Sen";
+  src: url("/fonts/Sen-Variable-latin.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Brand */
+  --mist-midnight: #010511;
+  --mist-azure: #0046de;
+  --mist-coral: #fe8192;
+
+  /* Neutrals and tints, from landing globals.css */
+  --mist-fog: #eef2ff;
+  --mist-paper: #f7f9ff;
+  --mist-deep: #060f2a;
+  --mist-azure-soft: #8fb0ff;
+  --mist-azure-deep: #0037b0;
+  --mist-coral-deep: #e86a7c;
+  --mist-coral-ink: #a8283b;
+
+  --mist-radius: 2px;
+  --mist-font-display: "Josefin Sans", ui-sans-serif, Futura, sans-serif;
+  --mist-font-text: "Sen", ui-sans-serif, system-ui, sans-serif;
+  --mist-font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --mist-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Type scale, landing --t-* (fluid between 390px and 1440px) */
+  --mist-t-display-xl: clamp(2.75rem, 1.55rem + 4.95vw, 6rem);
+  --mist-t-h1: clamp(2.25rem, 1.6rem + 2.4vw, 3.375rem);
+  --mist-t-h2: clamp(1.625rem, 1.35rem + 1.1vw, 2.25rem);
+  --mist-t-h3: clamp(1.25rem, 1.15rem + 0.45vw, 1.5rem);
+  --mist-t-lede: clamp(1.125rem, 1.04rem + 0.36vw, 1.375rem);
+  --mist-t-body: 1.0625rem;
+  --mist-t-small: 0.875rem;
+  --mist-t-label: 0.75rem;
+
+  --mist-gutter: clamp(1.25rem, 0.6rem + 2.7vw, 3.5rem);
+}
+
+/* Dark: the midnight surface. The header and the mobile menu sheet reuse this
+   block in both themes, so every derived variable is redeclared here. */
+:root,
+::backdrop,
+.page > .header,
+starlight-menu-button,
+.mist-dark {
+  --mist-fg: var(--mist-fog);
+  --mist-fg-2: rgb(238 242 255 / 0.74);
+  --mist-fg-3: rgb(238 242 255 / 0.58);
+  --mist-line: rgb(238 242 255 / 0.14);
+  --mist-line-strong: rgb(238 242 255 / 0.36);
+  --mist-panel: var(--mist-deep);
+  --mist-accent-text: var(--mist-azure-soft);
+  --mist-marker: var(--mist-coral);
+  --mist-focus: var(--mist-coral);
+
+  --sl-color-white: var(--mist-fog);
+  --sl-color-gray-1: rgb(238 242 255 / 0.92);
+  --sl-color-gray-2: rgb(238 242 255 / 0.74);
+  --sl-color-gray-3: rgb(238 242 255 / 0.58);
+  --sl-color-gray-4: rgb(238 242 255 / 0.36);
+  --sl-color-gray-5: rgb(238 242 255 / 0.22);
+  --sl-color-gray-6: var(--mist-deep);
+  --sl-color-black: var(--mist-midnight);
+
+  --sl-color-accent-low: color-mix(in srgb, var(--mist-azure) 24%, var(--mist-midnight));
+  --sl-color-accent: var(--mist-azure);
+  --sl-color-accent-high: var(--mist-azure-soft);
+
+  /* Starlight's four status hues fold into the brand: azure for information,
+     coral for warnings. Status is also said in words (the aside title). */
+  --sl-color-blue-low: color-mix(in srgb, var(--mist-azure) 20%, var(--mist-midnight));
+  --sl-color-blue: var(--mist-azure-soft);
+  --sl-color-blue-high: var(--mist-azure-soft);
+  --sl-color-purple-low: var(--sl-color-blue-low);
+  --sl-color-purple: var(--sl-color-blue);
+  --sl-color-purple-high: var(--sl-color-blue-high);
+  --sl-color-green-low: var(--sl-color-blue-low);
+  --sl-color-green: var(--sl-color-blue);
+  --sl-color-green-high: var(--sl-color-blue-high);
+  --sl-color-orange-low: color-mix(in srgb, var(--mist-coral) 14%, var(--mist-midnight));
+  --sl-color-orange: var(--mist-coral);
+  --sl-color-orange-high: var(--mist-coral);
+  --sl-color-red-low: var(--sl-color-orange-low);
+  --sl-color-red: var(--sl-color-orange);
+  --sl-color-red-high: var(--sl-color-orange-high);
+
+  --sl-color-text: var(--mist-fg-2);
+  --sl-color-text-accent: var(--mist-accent-text);
+  --sl-color-text-invert: var(--mist-midnight);
+  --sl-color-bg: var(--mist-midnight);
+  --sl-color-bg-nav: var(--mist-midnight);
+  --sl-color-bg-sidebar: var(--mist-midnight);
+  --sl-color-bg-inline-code: var(--mist-deep);
+  --sl-color-bg-accent: var(--mist-coral);
+  --sl-color-hairline-light: var(--mist-line);
+  --sl-color-hairline: var(--mist-line);
+  --sl-color-hairline-shade: var(--mist-line);
+  --sl-color-backdrop-overlay: rgb(1 5 17 / 0.72);
+
+  /* The Flat Rule: no shadows. */
+  --sl-shadow-sm: none;
+  --sl-shadow-md: none;
+  --sl-shadow-lg: none;
+
+  color-scheme: dark;
+}
+
+/* Light: the fog reading surface, paper for raised panels. */
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --mist-fg: var(--mist-midnight);
+  --mist-fg-2: rgb(1 5 17 / 0.74);
+  --mist-fg-3: rgb(1 5 17 / 0.62);
+  --mist-line: rgb(1 5 17 / 0.13);
+  --mist-line-strong: rgb(1 5 17 / 0.4);
+  --mist-panel: var(--mist-paper);
+  --mist-accent-text: var(--mist-azure);
+  --mist-marker: var(--mist-azure);
+  --mist-focus: var(--mist-azure);
+
+  --sl-color-white: var(--mist-midnight);
+  --sl-color-gray-1: rgb(1 5 17 / 0.9);
+  --sl-color-gray-2: rgb(1 5 17 / 0.74);
+  --sl-color-gray-3: rgb(1 5 17 / 0.62);
+  --sl-color-gray-4: rgb(1 5 17 / 0.4);
+  --sl-color-gray-5: rgb(1 5 17 / 0.24);
+  --sl-color-gray-6: var(--mist-paper);
+  --sl-color-gray-7: var(--mist-paper);
+  --sl-color-black: var(--mist-fog);
+
+  --sl-color-accent-low: color-mix(in srgb, var(--mist-azure) 10%, var(--mist-fog));
+  --sl-color-accent: var(--mist-azure);
+  --sl-color-accent-high: var(--mist-azure-deep);
+
+  --sl-color-blue-low: color-mix(in srgb, var(--mist-azure) 8%, var(--mist-paper));
+  --sl-color-blue: var(--mist-azure);
+  --sl-color-blue-high: var(--mist-azure-deep);
+  --sl-color-purple-low: var(--sl-color-blue-low);
+  --sl-color-purple: var(--sl-color-blue);
+  --sl-color-purple-high: var(--sl-color-blue-high);
+  --sl-color-green-low: var(--sl-color-blue-low);
+  --sl-color-green: var(--sl-color-blue);
+  --sl-color-green-high: var(--sl-color-blue-high);
+  --sl-color-orange-low: color-mix(in srgb, var(--mist-coral) 14%, var(--mist-paper));
+  --sl-color-orange: var(--mist-coral-deep);
+  --sl-color-orange-high: var(--mist-coral-ink);
+  --sl-color-red-low: var(--sl-color-orange-low);
+  --sl-color-red: var(--sl-color-orange);
+  --sl-color-red-high: var(--sl-color-orange-high);
+
+  --sl-color-text: var(--mist-fg-2);
+  --sl-color-text-accent: var(--mist-accent-text);
+  --sl-color-text-invert: var(--mist-fog);
+  --sl-color-bg: var(--mist-fog);
+  --sl-color-bg-nav: var(--mist-midnight);
+  --sl-color-bg-sidebar: var(--mist-fog);
+  --sl-color-bg-inline-code: var(--mist-paper);
+  --sl-color-bg-accent: var(--mist-azure);
+  --sl-color-hairline-light: var(--mist-line);
+  --sl-color-hairline: var(--mist-line);
+  --sl-color-hairline-shade: var(--mist-line);
+  --sl-color-backdrop-overlay: rgb(1 5 17 / 0.5);
+
+  color-scheme: light;
+}
+
+/* Layout and type metrics Starlight reads */
+:root {
+  --sl-font: var(--mist-font-text);
+  --sl-font-mono: var(--mist-font-mono);
+  --sl-text-body: var(--mist-t-body);
+  --sl-text-code: 0.8125rem;
+  --sl-text-code-sm: 0.8125rem;
+  --sl-line-height: 1.65;
+  --sl-line-height-headings: 1.1;
+  --sl-text-h1: var(--mist-t-h1);
+  --sl-text-h2: var(--mist-t-h2);
+  --sl-text-h3: var(--mist-t-h3);
+  --sl-text-h4: 1.1875rem;
+
+  --sl-nav-height: 4rem;
+  --sl-nav-pad-x: var(--mist-gutter);
+  --sl-content-pad-x: var(--mist-gutter);
+  --sl-content-width: 46rem;
+  --sl-sidebar-width: 18rem;
+  --sl-sidebar-pad-x: 1.25rem;
+  --sl-menu-button-size: 2.75rem;
+}
+
+@media (min-width: 72rem) {
+  :root {
+    --sl-nav-height: 4.5rem;
+    --sl-content-pad-x: 3rem;
+  }
+}
