@@ -1,0 +1,97 @@
+---
+title: Merkle trees
+description: "The 4-ary HM4 Merkle tree behind the transactions, zkState and registered-users trees: the node hash, prover-ordered insertion, the 30-element proof and its cost."
+sidebar:
+  order: 4
+---
+
+import Figure from "../../../components/diagrams/Figure.astro";
+import Cell from "../../../components/diagrams/Cell.astro";
+
+MIST's three Merkle trees share one shape: depth 10, four children per node, and a node hash that sorts its children. A membership proof is 30 field elements, three siblings for each level.
+
+## Node hash
+
+`HM4` hashes four children, with zero standing for a missing child. Sort them so that `a <= b <= c <= d`:
+
+- If `a`, `b` and `c` are all zero, the node is `d`. A node with one non-zero child passes it through unchanged, and a node with none is zero.
+- Otherwise the node is one evaluation of the width-4 Poseidon2 permutation over `(a, b, c, d)`, read as `state[0] + state[1]`.
+
+Each node costs at most one permutation. `HM4(x, 0, 0, 0) == x`, so a tree with few leaves needs no padding levels: the levels above its height pass the value through to depth 10. An empty tree's root is zero.
+
+## Prover-ordered insertion
+
+In the circuit, each level takes the running value and three siblings `w0 <= w1 <= w2` from the proof. Three conditional swaps place the running value among them before the permutation runs.
+
+<Figure
+  label="One Merkle level in the circuit. First, three siblings from the proof in ascending order. Second, three conditional swaps insert the running value among them, in sorted position for an honest prover. Third, the four values hash to the parent node, or pass a lone non-zero child through."
+  caption="One level of the fold. The coral cell is the running value, inserted among its siblings. Ten levels of this make one membership proof."
+>
+  <ol class="mist-moves">
+    <li class="mist-move">
+      <p class="mist-label">1 Siblings</p>
+      <div class="mist-move__stage">
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+      </div>
+      <p class="mist-move__note">Three siblings from the proof, ascending. A missing child is zero.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">2 Insert</p>
+      <div class="mist-move__stage">
+        <Cell state="recorded" />
+        <Cell state="followed" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+      </div>
+      <p class="mist-move__note">Three swaps, each on a boolean the prover supplies, place the running value.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">3 Parent</p>
+      <div class="mist-move__stage">
+        <Cell state="recorded" />
+      </div>
+      <p class="mist-move__note">One permutation, read as state 0 plus state 1. The parent is the next level's running value.</p>
+    </li>
+  </ol>
+</Figure>
+
+Each swap bit comes from a solver hint that compares the running value with the sibling, so an honest prover inserts it in sorted position. The circuit constrains each bit only to be boolean. Membership still holds only for the sorted order: the Chamber, each Reserve and the native Go tree build every node over sorted children, so any other order hashes to a different parent and the fold misses the root.
+
+## Proof shape
+
+A proof has 10 levels of three siblings, ascending within each level, so 30 elements. Missing children are zero, and every level above the tree's height is all zeros.
+
+| Source | Returns |
+| --- | --- |
+| `Chamber.merkleProof(index)` | The 30-element proof for global note index `index`, against the current root of that note's transactions tree |
+| `Reserve.registeredUserProof(index)` | The 30-element proof for the user at `index`, against the Reserve's users root |
+| `core/circuits/lib/merkle` | The native Go tree, `NativeHM4Tree`, with `NativeHM4ProveAt(idx)` |
+
+The contracts return a flat array, level by level. The circuit takes the same values as `[10][3]`.
+
+## Properties
+
+- **Position independence.** Because `HM4` sorts its children, a proof shows that a leaf is in the tree, not where. Nothing in the protocol depends on a leaf's position today. A future rule that does must bind the index itself.
+- **Pass-through.** A node's value is a valid leaf at any depth, the root included. This is not exploitable: spending a note needs a Poseidon2 preimage of a note hash, and the fixed 30-element proof pins the depth for the circuit.
+- **Updates.** Zeroing a leaf, which is how a Reserve removes a user, recomputes its ancestors over the same zero-padded groups. The result equals a fresh tree built over the same leaves, with that one set to zero, only because `HM4` sorts.
+
+## The three trees
+
+| Tree | Held by | Leaf | Capacity | Roots a spend may use |
+| --- | --- | --- | --- | --- |
+| Transactions | The Chamber, one tree per `treeId` | A note hash | 4^10 = 1,048,576 per tree. When a tree fills, the next one opens | Every root any transactions tree has had |
+| zkState | The Chamber | `H3(reserve, reserveConfig, usersRoot)`, one per Reserve | 4^10 Reserves | The current root, or one superseded less than 10 minutes ago |
+| Registered users | Each Reserve | `H2(owner, userKeyExchange)`, one per member | 4^10 leaf slots, removed users included | Proven against the users root inside the Reserve's zkState leaf |
+
+Both inputs of a spend share one `transactions_root`, so two real notes in different transactions trees cannot be spent together.
+
+## Cost
+
+| Operation | Constraints |
+| --- | --- |
+| One node, selector included | 283 |
+| One membership lookup, 10 levels | 2,821 |
+
+Counts are from core's committed constraint snapshot. Every spend runs four folds, whatever its inputs: one per input note, one for the Reserve's zkState leaf and one for the sender's users leaf. A dummy's fold and the users fold at a Reserve without members are computed and their results ignored, so the circuit's shape never changes.
