@@ -1,0 +1,157 @@
+---
+title: Chamber
+description: "Chamber.sol in detail: deposits with refundTo and returned ids, the asset list and minimum deposit, deposit screening and reclaim, handleZkp spends, and the Reserve registry."
+sidebar:
+  order: 2
+---
+
+The Chamber is the state engine: it takes deposits, verifies each spend and applies it, and keeps the record of notes. It holds no assets. Every asset sits in a Reserve, and the Chamber moves it only by calling that Reserve.
+
+## Constants
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `MAX_AMOUNT_SUPPORTED` | 2^120 | Every deposited amount and minimum deposit is below it |
+| `ZK_STATE_ROOT_GRACE` | 10 minutes | How long a superseded zkState root stays accepted |
+| `VERIFIER_DELAY` | 7 days | Delay between proposing and executing a verifier change |
+| `OWNERSHIP_DELAY` | 7 days | Delay before a new owner can accept ownership |
+| `SPEND_PAUSE_MAX` | 3 days | Length of one spend pause |
+| `SPEND_PAUSE_COOLDOWN` | 7 days | Minimum gap between the end of one spend pause and the next |
+
+The immutable `chamberId` is `H2(block.chainid, address(this))`, computed in the constructor. The constructor takes `(owner_, verifier_)` and reverts with `invalid verifier` if the verifier address has no code.
+
+## Deposits
+
+```solidity
+function deposit(
+  address reserve_,
+  uint256 ownerCommitment_,
+  uint256 amount,
+  address asset_
+) external returns (uint256 noteHash, uint256 depositId);
+
+function deposit(
+  address reserve_,
+  uint256 ownerCommitment_,
+  uint256 amount,
+  address asset_,
+  address refundTo
+) external returns (uint256 noteHash, uint256 depositId);
+```
+
+A deposit takes no proof. The depositor approves the Reserve, not the Chamber, for `amount` of the asset. The Chamber then checks, in order:
+
+1. Inflows are not paused (`Chamber: inflows paused`).
+2. The Reserve is registered (`reserve is not registered`).
+3. The asset is listed at the Reserve: its minimum deposit is not 0 (`Chamber: asset not allowed`).
+4. `ownerCommitment_` is below the field order (`Chamber: owner commitment not in field`).
+5. `Reserve.deposit(msg.sender, amount, asset_)` pulls the asset and returns the balance the Reserve actually gained, which must be above 0 (`Reserve: zero deposit`).
+6. The received amount is below 2^120 (`amount exceeds 2^120`) and at least the minimum (`Chamber: deposit below minimum`).
+7. The note hash, `hashNote(chamberId, reserve_, ownerCommitment_, asset_, received)`, is not already in a transactions tree (`transaction already exists`).
+
+The note binds the received amount, so an asset that takes a fee on the incoming transfer yields a smaller note, not a shortfall. What happens next depends on the Reserve's screener:
+
+| Reserve | Result | Return value |
+| --- | --- | --- |
+| No screener | The note is appended to the transactions tree at once and recorded in `assets` | `(noteHash, 0)` |
+| A screener | The deposit is queued under `depositId = ++depositCount`, and `DepositQueued` is emitted. The note stays out of the tree until the screener decides | `(noteHash, depositId)` |
+
+`refundTo` names who receives a reclaim. It cannot be zero (`Chamber: zero refundTo`). The four-argument form uses the depositor. A router that deposits for a user names the user, so a rejected deposit is never stranded behind a contract that cannot reclaim. `refundTo` matters only for a queued deposit.
+
+An owner commitment is single-use per Reserve, asset and amount: a second deposit with the same values gives a note hash that is already recorded, and reverts. Use a fresh blinding for every deposit.
+
+## Screening
+
+A Reserve's screener is an off-chain service, such as a KYT bot or an API relayer, that decides which deposits enter the transactions tree. Its decision is recorded with a `bytes32 evidence`, a commitment to the off-chain screening record, emitted per deposit. Screening is experimental and runs on entry only.
+
+```solidity
+function approveDeposits(uint256[] calldata depositIds, bytes32 evidence) external;
+function rejectDeposits(uint256[] calldata depositIds, bytes32 evidence) external;
+function reclaimDeposit(uint256 depositId) external;
+function depositRefundTo(uint256 depositId) public view returns (address);
+```
+
+| Function | Who | Effect |
+| --- | --- | --- |
+| `approveDeposits` | The screener of each deposit's Reserve | Appends each pending note and emits `DepositApproved`. A note already in a tree is rejected instead, with `DepositDuplicateRejected`. Ids that are not pending are skipped. Paused with inflows |
+| `rejectDeposits` | The same | Marks each pending deposit rejected and emits `DepositRejected`. Rejection is final. Never paused |
+| `reclaimDeposit` | The depositor or `refundTo` | Pays a pending or rejected deposit back to `depositRefundTo(id)`, which is `refundTo` if one was named and the depositor otherwise. Emits `DepositReclaimed`. Never paused |
+
+- **The screener is read at decision time.** A batch reverts with `Chamber: only reserve screener` if the caller is not the current screener of a pending deposit in it. A new screener therefore decides every deposit still waiting. With no screener set, waiting deposits can only be reclaimed.
+- **The queue is keyed by deposit id,** not by note hash. A note hash is public in the deposit calldata, so a hash-keyed queue would let anyone block a deposit by queueing the same note first. Duplicate notes may queue side by side, and approval admits only the first.
+- **A screener cannot take funds.** It can keep a note out of the tree, but the depositor can always reclaim.
+- `pendingDeposits(id)` returns `(depositor, status, reserve, asset, amount, noteHash)`, with status `None`, `Pending` or `Rejected`. Approval and reclaim clear the record, so `None` also covers settled and unknown ids.
+
+## Spends
+
+```solidity
+function handleZkp(
+  uint256[8] calldata proof,
+  uint256[14] calldata input,
+  uint256[] calldata auditorCommitments_
+) external returns (PublicParams memory params);
+```
+
+One function settles every spend: a private payment, a withdrawal or both. It runs these steps in order and reverts at the first that fails:
+
+| Step | Check or effect | Revert |
+| --- | --- | --- |
+| 1 | Spends are not paused | `Chamber: spends paused` |
+| 2 | Inputs 7, 8 and 9 (`withdraw_asset`, `withdraw_reserve`, `withdraw_to`) are below 2^160 | `address input out of range` |
+| 3 | `verifier.verifyProof(proof, input)` | `ProofInvalid` or `PublicInputNotInField` |
+| 4 | `auditorCommitments_` has six elements below the field order that fold to input 13, or is empty and input 13 is 0 | `bad commitments preimage` |
+| 5 | `transactions_root` is a root some transactions tree has had | `invalid merkle proof` |
+| 6 | `state_root` is the current zkState root or a superseded one still in its grace window | `invalid state root` |
+| 7 | With `auth_done = 0`, `owner == uint160(msg.sender)`. Any value other than 0 or 1 reverts | `only owner caller`, `invalid authDone` |
+| 8 | Neither nullifier is spent. Both are marked spent | `transaction is spent` |
+| 9 | If commitments were published: file them under element 0 and emit `PrivateTransfer` | `private tx key used` |
+| 10 | Append `new_note_1`, then `new_note_2` | None in practice: a full tree rolls over |
+| 11 | If `withdraw_amount` is not 0: `Reserve(withdraw_reserve).withdraw(withdraw_to, withdraw_amount, withdraw_asset)` | The asset's transfer revert |
+
+- **No assets move on a private payment.** The withdrawal call is last, after every state write.
+- **Every spend appends two notes,** zero-amount outputs included, so spends look alike.
+- **The Reserve is not looked up.** The circuit binds `withdraw_reserve` to the custody of the spent notes, and a note enters a tree only through a registered Reserve's deposit.
+- **A filed spend** is stored as `privateTxCommitments(privateTxKey)`, which returns `(newNote1, newNote2, blockNumber, txIndex)`. `txIndex` is `newNote1`'s global index, and `newNote2` follows it. An identifier can be filed once, across every Reserve.
+- **Calling `handleZkp`** with `auth_done = 1` is open to anyone, so a relayer can submit it. Nothing in core pays the relayer. A relayer fee is **Planned**.
+
+`deposit`, `handleZkp`, `approveDeposits`, `rejectDeposits` and `reclaimDeposit` share one reentrancy guard.
+
+## Reserve registry
+
+```solidity
+function registerReserve(
+  address admin_,
+  uint256 keyHash_,
+  uint256 keyInputPoint_
+) external onlyOwner returns (address);
+```
+
+Only the Chamber owner registers a Reserve. `registerReserve` deploys a new `Reserve(admin_, address(this), keyHash_, keyInputPoint_)`, records it, and appends its zkState leaf `H3(reserve, H2(keyHash_, keyInputPoint_), 0)`, so the Reserve is spendable from its first block. It reverts with `invalid reserve admin` for a zero admin. After registration the Chamber owner holds no role on the Reserve: only its admin moves the admin role and grants permissions.
+
+A new Reserve has no listed asset and no screener, so nothing is depositable until its `ASSETS` holder lists an asset. If an asset is listed before a screener is set, deposits made in between enter unscreened.
+
+A registered Reserve updates its own record through four setters. Each acts on `msg.sender`'s record and reverts with `Chamber: not a registered reserve` for any other caller:
+
+| Setter | Called from | Effect |
+| --- | --- | --- |
+| `setReserveConfig(reserveConfig)` | `Reserve.updateAuditorKey` | Rewrites the Reserve's zkState leaf and makes the new zkState root current |
+| `setReserveStateRoot(stateRoot)` | `Reserve.addUser`, `Reserve.removeUser` | The same, with the new users root. When the users root first becomes non-zero, every superseded zkState root stops being accepted |
+| `setReserveScreener(screener)` | `Reserve.setScreener` | Sets or clears, with zero, the Reserve's screener |
+| `setReserveAssetMinDeposit(asset, minDeposit)` | `Reserve.setAssetMinDeposit` | Lists the asset with a minimum below 2^120, or delists it with zero |
+
+`reserveConfigs(reserve)` returns `(leafIndex, reserveConfig, stateRoot)`, `reserveScreeners(reserve)` the screener and `reserveAssetMinDeposit(reserve, asset)` the minimum. [Trees and roots](/contracts/trees-and-roots/) covers the zkState root and its grace window.
+
+## Views
+
+| View | Returns |
+| --- | --- |
+| `hashNote(chamber_, reserve_, ownerCommitment_, asset_, amount_)` | A note hash, in the circuit's preimage order |
+| `nullified(nullifier)`, `nullifiersSpent(nullifiers)` | Whether each nullifier is spent |
+| `transactionsExist(notes)`, `noteIndexPlusOne(note)` | Whether each note was appended, and 1 plus a note's first global index (0 if never) |
+| `assetsFromNote(noteHash)` | `(amount, addr)` of a deposited note. Spend outputs have no entry |
+| `privateTxCommitments(privateTxKey)` | The record of a spend filed under that identifier |
+| `pendingDeposits(id)`, `depositCount()`, `depositRefundTo(id)` | Queued deposits and their reclaim recipient |
+| `isRegisteredReserve(reserve)` | Whether this Chamber registered the address |
+| `spendsPaused()`, `spendPausedUntil()`, `inflowsPaused()`, `guardian()` | Pause state. See [Roles and security](/contracts/roles-and-security/) |
+
+The transactions-tree and zkState views are on [Trees and roots](/contracts/trees-and-roots/).
