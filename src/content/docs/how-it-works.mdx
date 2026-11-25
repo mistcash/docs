@@ -1,0 +1,85 @@
+---
+title: How MIST works
+description: "Notes, owners and nullifiers, the three moves of a MIST payment, what a proof states, and what each party can see."
+---
+
+import NoteLife from "../../components/diagrams/NoteLife.astro";
+
+A payment in MIST has three moves: a deposit into a Reserve, a private payment inside MIST, and an optional withdrawal to a public address.
+
+<NoteLife />
+
+## Notes
+
+Value lives in notes, as in a UTXO chain. A spend consumes notes and creates new ones. Nothing is updated in place. A note commits to six fields.
+
+| Field | Meaning |
+| --- | --- |
+| `chamber` | The Chamber ID, `H2(chainId, chamberAddress)`, so notes from different networks stay apart |
+| `reserve` | The address of the Reserve that holds the note's assets |
+| `blinding` | A random nonce |
+| `owner` | Who may spend the note |
+| `asset` | The address of the asset contract |
+| `amount` | Below 2^120 |
+
+The note hash combines them. `H2` and `H4` are Poseidon2 compressions of two and four field elements.
+
+```text
+note_hash = H4( H2(chamber, reserve), H2(blinding, owner), asset, amount )
+```
+
+Only the owner commitment `H2(blinding, owner)` enters a new note. A note hash never reveals the recipient's address or identity, and whoever creates a note does not need the recipient's blinding or owner.
+
+### Owners
+
+A note has one of two kinds of owner, and the kind decides who authorises the spend.
+
+- **A wallet or contract address**, including a middleware. The spend carries `auth_done = 0` and the Chamber requires `msg.sender` to equal the owner. The spend publishes `owner`, so it links to that address.
+- **A MIST Address**, `H2(p, "owner")` for a secret `p`. The spend carries `auth_done = 1` and the proof itself shows knowledge of `p`. Anyone, a relayer for example, can submit the spend.
+
+### Nullifiers
+
+A spend marks each input note as spent by publishing its nullifier: the note hash computed with the blinding incremented by one.
+
+```text
+nullifier = H4( H2(chamber, reserve), H2(blinding + 1, owner), asset, amount )
+```
+
+The Chamber rejects a nullifier it has seen before. Anyone who knows a note's fields can compute its nullifier and watch for the spend, though that does not let them spend it. A wallet that derives blindings sequentially links its notes, because one note's nullifier equals the hash of the note with the next blinding. Blindings must be derived independently.
+
+## A note's life
+
+1. **Deposit.** The depositor approves the Reserve, not the Chamber, to move the asset. They then call `Chamber.deposit` with the Reserve, an owner commitment, an amount and the asset. No proof is needed. The Reserve pulls the asset and the Chamber appends the note to the transactions tree. At a Reserve with a deposit screener, the note waits in a queue until the screener approves it. The transfer into the Reserve is public. The owner of the note is not.
+2. **Private payment.** The owner proves a spend of up to two notes into two new notes, for any owners, in the same Reserve and asset. Observers see two nullifiers and two new note hashes. Who paid stays hidden when the notes are owned by a MIST Address. A wallet or contract owner is public, because the Chamber checks it as the caller.
+3. **Withdrawal.** The same kind of spend can pay part of the value to a public address. The withdrawal reveals its amount, asset, Reserve and recipient.
+
+Every spend has the same shape, two inputs and two outputs. A zero-amount dummy note pads a spend that has only one real input or one real output, so spends look alike.
+
+## What a proof states
+
+Each spend is one Groth16 proof over BN254, generated on the user's device. The prover also builds to WebAssembly, so it runs in a browser. The proof states that:
+
+- the input notes are in the transactions tree, at a root the Chamber has produced;
+- the nullifiers are derived from those notes;
+- the inputs sum to the outputs plus the withdrawal, with every amount range checked to 120 bits;
+- the spend moves one asset, within one Chamber and one Reserve;
+- the spend is authorised by the notes' owner;
+- the Reserve is in the current zkState tree.
+
+[Circuits](/circuits/) lists each check.
+
+## Who sees what
+
+| Party | Sees | Does not see |
+| --- | --- | --- |
+| Observer: anyone reading the chain | Deposits: depositor, Reserve, asset and amount. For a spend: both nullifiers, both new note hashes, both tree roots, `owner` and `auth_done`, and whether a withdrawal happened with its amount, asset, Reserve and recipient | Which notes were spent, the input amounts and how the outputs split them, the output owners, and the asset and Reserve of a private payment |
+| Reserve manager, at a Reserve with members | For each member spend: the sender, the asset, both output amounts and both output owner commitments | Who the recipients are: they appear only as commitments |
+| Reviewer: an outside party handed one payment's key | That payment's asset, both output amounts and both output owner commitments | Everything else, including other payments and the sender |
+
+## Limits
+
+- **Withdrawals are public.** Amount, asset, Reserve and recipient are published.
+- **A wallet or contract owner is public** on every spend of its notes.
+- **Note discovery is not specified.** Nothing in the protocol tells a recipient that a note was created for them. Wallets learn of their notes out of band.
+- **The proofs are not post-quantum.** They are Groth16. The manager's registration signature is ECDSA. Records are sealed with a symmetric, hash-based cipher under a key from an off-chain key exchange, and the protocol does not fix that exchange.
+- **No relayer is paid.** Anyone can submit an `auth_done = 1` spend, but nothing in the protocol as specified pays them. The withdrawing user then funds gas from a wallet, which links that wallet to the withdrawal. Relayer fees are Planned.

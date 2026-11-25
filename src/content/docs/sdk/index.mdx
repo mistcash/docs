@@ -1,0 +1,54 @@
+---
+title: SDK
+description: "@mistcash/sdk, the TypeScript SDK for MIST on EVM: proving on the user's device and a client for the Chamber and Reserve contracts."
+sidebar:
+  label: Overview
+  order: 0
+---
+
+`@mistcash/sdk` is the TypeScript SDK for MIST on EVM. It builds spend proofs on the user's device, in Node or in a browser, and wraps the calls to the Chamber and Reserve contracts.
+
+## Install
+
+```bash
+npm install @mistcash/sdk@beta viem
+```
+
+Version 0.6 is a rewrite and ships on the `beta` tag. The `latest` tag is the legacy 0.5 SDK, which has a different API.
+
+## Entry points
+
+| Import | Contents |
+| --- | --- |
+| `@mistcash/sdk` | `MistClient`, the types, the contract ABIs and the note, proving and key-exchange helpers. Safe to import during server-side rendering: it loads no WebAssembly |
+| `@mistcash/sdk/prover` | `loadProver` and `createWorkerProver`, which run the prover from `mist.wasm`, about 20 MB, in Node or in a Web Worker |
+| `@mistcash/sdk/prover/webgpu` | The same prover on gnark's WebGPU backend. It falls back to the CPU when there is no GPU |
+| `@mistcash/sdk/mist.wasm` | The prover binary, with its proving key embedded |
+| `@mistcash/sdk/circuit.json` | The circuit description the prover was built from |
+
+## What the client does
+
+`MistClient` takes an address book, a chain adapter and a prover. It covers each role in the protocol.
+
+- **Depositor.** `deposit` approves a Reserve and deposits into a private note. `refreshScreening` and `reclaimDeposit` follow a deposit through a screener.
+- **Member.** `join` runs the key exchange with a Reserve's manager and registers the member. `spend` builds the proof and submits a private payment or a withdrawal.
+- **Reserve manager.** `registerReserve`, `setRegistrar`, `setReserveScreener` and `updateAuditorKey` administer a Reserve. `openPayload` reads a member's spend.
+- **Screener.** `queuedDeposits`, `approveDeposits` and `rejectDeposits` decide the deposits waiting at a Reserve.
+
+```ts
+// Deposit into a private note, then withdraw it back to the public account.
+await client.deposit({ reserve, id: "me (MIST)", amount, blinding: rand() });
+await client.spend({ id: "me (MIST)", amount: 0n, withdraw: amount, withdrawTo: "me", reserve });
+```
+
+Registration uses a post-quantum key exchange. The SDK ships X-Wing, a hybrid of ML-KEM-768 and X25519, as `encapsulate`, `decapsulate` and `deriveUkx`. The protocol does not fix the exchange, so a Reserve can use another.
+
+## Caveats
+
+:::caution[Before building on the SDK]
+- `secretOf` derives a MIST secret from a private key and is for development only. A browser wallet never exposes its key, so an application must derive the secret from a wallet signature.
+- The prover's note amount is a `uint64`, so one note holds at most about 18.4 units of an asset with 18 decimals. The protocol allows amounts below 2^120. Larger amounts split across notes.
+- With a `StorageAdapter`, call `restoreKeyIndices()` once at startup. Without it, a reload can reuse a key index and the Chamber reverts the spend.
+:::
+
+The repository's [README](https://github.com/mistcash/sdk) has the full setup, including bundler configuration for Vite and webpack.

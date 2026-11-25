@@ -1,0 +1,76 @@
+---
+title: Circuits
+description: "PrimaryTransactionCircuit, the one Groth16 circuit behind every MIST spend: its shape, public inputs and checks."
+sidebar:
+  label: Overview
+  order: 0
+---
+
+Every MIST spend is one Groth16 proof of one circuit, `PrimaryTransactionCircuit`. It is written in Go with gnark and proven over BN254.
+
+The circuit enforces the money rules. Nothing is printed or destroyed: value is pooled and moved from one set of notes to another, or withdrawn on-chain.
+
+## Shape
+
+A spend has two input notes and two output notes. A zero-amount dummy note pads a spend that has only one real input or output. At least one input must be real.
+
+Private inputs are the transaction's `chamber` and `reserve`, the two input notes with their Merkle proofs, the two output notes as owner commitments and amounts, and the witnesses for Reserve messaging.
+
+## Public inputs
+
+The Chamber decodes the public inputs in this order. The count and order are a contract between the circuit and `Chamber.sol`: changing either changes the verifier.
+
+| # | Input | Meaning |
+| --- | --- | --- |
+| 1 | `nullifier_1` | Nullifier of the first spent note |
+| 2 | `nullifier_2` | Nullifier of the second spent note |
+| 3 | `new_note_1` | First new note hash to append |
+| 4 | `new_note_2` | Second new note hash to append |
+| 5 | `transactions_root` | The transactions-tree root the inputs are proven against |
+| 6 | `state_root` | The zkState root, shared by every Reserve |
+| 7 | `withdraw_amount` | The optional withdrawal amount, zero without one |
+| 8 | `withdraw_asset` | The asset withdrawn |
+| 9 | `withdraw_reserve` | The Reserve that pays out |
+| 10 | `withdraw_to` | The public recipient |
+| 11 | `tx_payload` | Free payload, for middleware |
+| 12 | `owner` | The transaction owner |
+| 13 | `auth_done` | Whether the proof (1) or the caller (0) authorised the spend |
+| 14 | `auditor_commitments` | The fold of the commitments the spend publishes |
+
+## What the circuit checks
+
+- **Range.** Every amount is decomposed to 120 bits, so the conservation sum cannot wrap around the field.
+- **Conservation.** The input amounts equal the output amounts plus `withdraw_amount`.
+- **Membership and nullifiers.** Each real input is in `transactions_root`, and its nullifier is derived from the note.
+- **Nullifier distinctness.** `nullifier_1` differs from `nullifier_2`, so one note cannot fill both inputs.
+- **One asset, one custody.** A spend moves one asset. Every note commits under the same `H2(chamber, reserve)`, by construction.
+- **Owner authorisation.** With `auth_done = 1`, each input's owner is `H2(owner_secret, "owner")`. With `auth_done = 0`, both inputs share one owner and it equals the public `owner`.
+- **Withdrawal pinning.** `withdraw_asset` and `withdraw_reserve` are zero without a withdrawal, and the spend's own asset and Reserve with one.
+- **Reserve state.** The Reserve's zkState leaf is in `state_root` on every spend.
+- **Reserve messaging.** At a Reserve with registered users, the sender is a member and the spend publishes its details encrypted for the manager.
+
+The circuit does not check whether a nullifier was already spent. The Chamber does, when it settles the spend.
+
+:::caution[Soundness]
+A witness that solves does not show that a circuit is sound. Every public input must carry a non-zero coefficient in some constraint, or it can be rewritten in calldata without invalidating the proof.
+:::
+
+## Cost
+
+Costs are R1CS constraints, recorded in the constraint snapshot that core commits.
+
+| Operation | Constraints |
+| --- | --- |
+| `H2`, Poseidon2 of two elements | 217 |
+| `H3`, of three elements | 241 |
+| `H4`, of four elements | 265 |
+| One Merkle node | 283 |
+| One Merkle membership lookup | 2,821 |
+
+## Planned
+
+The specification describes three circuit changes that are not built: a relayer fee leg, exit spends that let any owner leave a Reserve, and sequential messaging identifiers. Each lands as its own circuit version.
+
+## Source
+
+The circuit is `core/circuits/src/primary.go`. Its Poseidon2 and Merkle gadgets are in `core/circuits/gadgets`, and the native reference implementations in `core/circuits/lib`. The [specification](https://github.com/mistcash/mist/blob/main/spec/04_circuit_architecture.md) defines each check.
