@@ -1,0 +1,157 @@
+---
+title: Events and errors
+description: "Every event the Chamber, Reserve and ManagerSigRegistrar emit, with parameters and when each fires, and the revert reasons an integrator meets."
+sidebar:
+  order: 7
+---
+
+The contracts emit an event for every note appended, every deposit decision, every registry change and every governance action, so an indexer can rebuild the record from logs. The reverts are plain strings except in the generated verifier and inherited OpenZeppelin code, which use custom errors.
+
+## Chamber events
+
+### Notes and spends
+
+| Event | Emitted when |
+| --- | --- |
+| `NoteAppended(uint256 indexed index, uint256 indexed note, uint256 root)` | Any note joins a transactions tree. `index` is global, `root` is the new root of that note's tree |
+| `TxTreeOpened(uint256 indexed treeId, uint256 firstIndex)` | A full tree rolls over and tree `treeId` takes its first leaf. Not emitted for tree 0 |
+| `PrivateTransfer(uint256 indexed privateTxKey, uint256 newNote1, uint256 newNote2, uint256[] commitments)` | A spend publishes commitments. `commitments` is the full six-element preimage |
+
+A spend with no commitments emits only its two `NoteAppended` events. Nullifiers are not emitted. They are in `handleZkp`'s calldata and readable with `nullified`.
+
+### Deposits
+
+| Event | Emitted when |
+| --- | --- |
+| `DepositQueued(uint256 indexed depositId, uint256 noteHash, address indexed reserve, address indexed depositor, address asset, uint256 amount)` | A deposit at a screened Reserve is queued. `amount` is what the Reserve received |
+| `DepositApproved(uint256 indexed depositId, uint256 indexed noteHash, bytes32 evidence)` | The screener admits a queued deposit. A `NoteAppended` follows |
+| `DepositRejected(uint256 indexed depositId, bytes32 evidence)` | The screener refuses a queued deposit |
+| `DepositDuplicateRejected(uint256 indexed depositId, uint256 indexed noteHash)` | Approval finds the note already in a tree and rejects the deposit instead |
+| `DepositReclaimed(uint256 indexed depositId, address indexed depositor, address to)` | A pending or rejected deposit is paid back to `to` |
+
+An unscreened deposit emits only `NoteAppended`.
+
+### Reserves and zkState
+
+| Event | Emitted when |
+| --- | --- |
+| `ReserveRegistered(address indexed reserve, address indexed admin, uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)` | The owner registers a Reserve. `stateRoot` is 0 |
+| `ReserveConfigUpdated(address indexed reserve, uint256 reserveConfig, uint256 stateRoot)` | A Reserve's zkState leaf changes, from a config update or a users-root update |
+| `ZkStateRootUpdated(uint256 indexed newRoot, uint256 previousRootExpiresAt)` | The zkState root changes. `previousRootExpiresAt` is when the old root stops being accepted, 0 if there was none |
+| `ZkStateHistoryRetired(address indexed reserve, uint256 cutoff)` | A Reserve's users root first becomes non-zero, and every superseded root is retired |
+| `ReserveScreenerSet(address indexed reserve, address indexed screener)` | A Reserve sets or clears its screener |
+| `ReserveAssetMinDepositSet(address indexed reserve, address indexed asset, uint256 minDeposit)` | A Reserve lists an asset, changes its minimum, or delists it with 0 |
+
+### Governance
+
+| Event | Emitted when |
+| --- | --- |
+| `VerifierUpdateProposed(address indexed verifier, bytes32 codehash, uint256 eta)` | The owner proposes a verifier |
+| `VerifierUpdateCancelled(address indexed verifier)` | The owner drops a pending proposal |
+| `VerifierUpdated(address indexed verifier, bytes32 codehash)` | A proposed verifier goes live |
+| `OwnershipTransferQueued(address indexed newOwner, uint256 eta)` | The owner queues a transfer. Zero `newOwner` and `eta` mean it was cancelled |
+| `OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner)` | The same moment, from `Ownable2Step` |
+| `OwnershipTransferred(address indexed previousOwner, address indexed newOwner)` | A transfer completes, from `Ownable` |
+| `GuardianSet(address indexed guardian)` | The owner sets the guardian |
+| `InflowsPaused(address indexed by)`, `InflowsUnpaused(address indexed by)` | Inflows are paused or resumed |
+| `SpendsPaused(uint256 until)`, `SpendsUnpaused(address indexed by)` | Spends are paused until `until`, or resumed early |
+
+## Reserve events
+
+| Event | Emitted when |
+| --- | --- |
+| `UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)` | `addUser` appends a member. `index` is what `removeUser` takes |
+| `UserRemoved(uint256 indexed index, uint256 indexed leaf, uint256 root)` | `removeUser` zeroes a member's leaf |
+| `AuditorKeyUpdated(uint256 keyHash, uint256 keyInputPoint, uint256 reserveConfig)` | `updateAuditorKey` rotates the metadata |
+| `PermissionGranted(bytes32 indexed role, address indexed account)` | The admin grants a role |
+| `PermissionRevoked(bytes32 indexed role, address indexed account)` | The admin revokes a role |
+| `AdminTransferStarted(address indexed admin, address indexed pendingAdmin)` | The admin nominates a successor, or cancels with zero |
+| `AdminTransferred(address indexed previousAdmin, address indexed newAdmin)` | The nominee accepts |
+
+## ManagerSigRegistrar events
+
+| Event | Emitted when |
+| --- | --- |
+| `SignatureRevoked(address indexed reserve, uint256 indexed leaf, uint256 deadline, bytes32 digest)` | A `USERS` holder revokes an authorisation |
+
+A successful `registerUser` emits nothing of its own. The Reserve's `UserRegistered` records it.
+
+## What to monitor
+
+Watch `VerifierUpdateProposed` and compare its code hash with the expected build. Watch `SpendsPaused`, `InflowsPaused`, `OwnershipTransferQueued` and `TxTreeOpened`, `ZkStateRootUpdated` for root churn, and each Reserve's `AdminTransferStarted` and `PermissionGranted`. Compare each Reserve's balances with the notes it custodies.
+
+## Revert reasons
+
+### Chamber
+
+| Revert | Cause |
+| --- | --- |
+| `Chamber: inflows paused` | `deposit` or `approveDeposits` while inflows are paused |
+| `reserve is not registered` | Deposit to an address this Chamber did not register |
+| `Chamber: asset not allowed` | The asset is not listed at the Reserve |
+| `Chamber: owner commitment not in field` | The owner commitment is at or above the field order |
+| `amount exceeds 2^120` | The received amount, or a minimum deposit, is too large |
+| `Chamber: deposit below minimum` | The received amount is below the Reserve's minimum |
+| `transaction already exists` | The deposit's note hash is already in a tree |
+| `Chamber: zero refundTo` | The `refundTo` overload with a zero address |
+| `Chamber: only reserve screener` | A screening batch holds a pending deposit the caller does not screen |
+| `Chamber: no queued deposit` | Reclaim of an approved, reclaimed or unknown deposit |
+| `Chamber: only depositor or refundTo` | Reclaim by anyone else |
+| `Chamber: spends paused` | `handleZkp` during a spend pause |
+| `address input out of range` | A withdrawal address input is at or above 2^160 |
+| `bad commitments preimage` | The published commitments are not six in-field elements folding to the public input, or are present when it is 0 |
+| `invalid merkle proof` | `transactions_root` is not a root any transactions tree has had |
+| `invalid state root` | `state_root` is neither current nor in its grace window |
+| `only owner caller` | `auth_done = 0` and the caller is not `owner` |
+| `invalid authDone` | `auth_done` is neither 0 nor 1 |
+| `transaction is spent` | A nullifier is already spent |
+| `private tx key used` | The identifier was filed by an earlier spend |
+| `Chamber: not a registered reserve` | A Reserve setter called by any other address |
+| `invalid reserve admin` | `registerReserve` with a zero admin |
+| `invalid verifier` | A verifier address with no code, in the constructor or `proposeVerifier` |
+| `no pending verifier` | Execute or cancel with nothing proposed |
+| `verifier timelock` | Execute before the eta |
+| `verifier code changed` | The code at the proposed address no longer matches its hash |
+| `ownership timelock` | Accept before the eta |
+| `renounce disabled` | Any call to `renounceOwnership` |
+| `Chamber: only guardian`, `Chamber: only guardian or owner` | A pause function from another caller |
+| `Chamber: spend pause cooldown` | A spend pause within 7 days of the last one ending |
+| `Chamber: spends not paused` | `unpauseSpends` when no pause is running |
+| `merkle leaf index out of range` | `txTreeOf` or `merkleProof` past the last leaf |
+
+### Reserve
+
+| Revert | Cause |
+| --- | --- |
+| `Reserve: only chamber` | `deposit` or `withdraw` from any address but the Chamber |
+| `Reserve: zero deposit` | The Reserve's balance did not grow |
+| `Reserve: only admin` | An admin function from another caller |
+| `Reserve: only pending admin` | `acceptAdmin` from anyone but the nominee |
+| `Reserve: missing permission` | A permissioned function without the role |
+| `Reserve: unknown permission` | Grant or revoke of a role that is not one of the four |
+| `Reserve: zero user leaf`, `Reserve: user leaf not in field` | `addUser` with a zero or out-of-field leaf |
+| `Reserve: user already registered` | `addUser` with a leaf that is in the tree |
+| `Reserve: no user at index` | `removeUser` past the last leaf or on a zeroed leaf |
+| `Reserve: last user` | `removeUser` that would empty the users tree |
+| `Reserve: auditor key not in field` | A key element at or above the field order |
+| `Reserve: zero admin`, `Reserve: zero chamber` | Constructor with a zero address |
+
+### ManagerSigRegistrar
+
+| Revert | Cause |
+| --- | --- |
+| `Registrar: signature expired` | Called after the deadline |
+| `Registrar: signature revoked` | The digest was revoked |
+| `Registrar: missing users permission` | The signer, or the caller of `revoke`, lacks `USERS` on the Reserve |
+| `Registrar: invalid signature` | The signature does not verify for the signer |
+| `Registrar: bad signature length`, `Registrar: malleable signature`, `Registrar: bad signature v` | A malformed ECDSA signature from a signer with no code |
+
+### Custom errors
+
+| Error | From |
+| --- | --- |
+| `ProofInvalid()` | `ChamberVerifier`: the pairing check failed or a point is not on its curve |
+| `PublicInputNotInField()` | `ChamberVerifier`: a public input is at or above the field order |
+| `OwnableUnauthorizedAccount(address)` | `Ownable`: an owner function from another caller, or `acceptOwnership` from anyone but the pending owner |
+| `ReentrancyGuardReentrantCall()` | `ReentrancyGuard`: a reentrant call into a guarded Chamber function |
+| `SafeERC20FailedOperation(address)` | `SafeERC20`: an asset transfer returned false |
