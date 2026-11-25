@@ -28,7 +28,7 @@ gnark orders public inputs by field declaration in `PrimaryTransactionCircuit`. 
 | 12 | `auth_done` | `AuthDone` | `authDone` | 1 when the proof authorised the spend, 0 when the caller must be `owner` |
 | 13 | `auditor_commitments` | `AuditorCommitments` | `auditorCommitments` | The `Fold2` of the six commitment elements the spend publishes, or 0 |
 
-The count and order are the decoding contract between the circuit, `ChamberVerifier.sol` and `Chamber.PublicParams`. Changing either means a new circuit, a new verifier and a new `PublicParams` together. Core's `TestVerifierPublicInputCountMatchesCircuit` holds all three to 14, and a run against core `cf1413d` for these pages passed.
+The count and order are the decoding contract between the circuit, `ChamberVerifier.sol` and `Chamber.PublicParams`. Changing either means a new circuit, a new verifier and a new `PublicParams` together. Core's `TestVerifierPublicInputCountMatchesCircuit` holds all three to 14. No check compares the order field by field: it is held by the circuit's declaration order matching `PublicParams`, and the Foundry suite replays a real proof through `handleZkp`.
 
 ## Encoding
 

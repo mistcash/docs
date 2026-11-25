@@ -78,7 +78,7 @@ Each row is an assertion in `PrimaryTransactionCircuit.Define`.
 | Range | Every amount fits in 120 bits: both input amounts, both output amounts and `withdraw_amount`. The conservation sum therefore cannot wrap around the field |
 | Conservation | `In1.Amount + In2.Amount == Out1Amt + Out2Amt + withdraw_amount` |
 | One asset | The second input's asset address equals the first input's. Outputs carry no asset field of their own: they are hashed with the first input's asset |
-| One custody | `H2(Chamber, Reserve)` is computed once and fed into every note hash and nullifier. There is no per-note Chamber or Reserve field, so no spend crosses a Chamber or Reserve boundary. This costs no constraints |
+| One custody | `H2(Chamber, Reserve)` is computed once and fed into every note hash and nullifier. There is no per-note Chamber or Reserve field, so every note in a spend has the same custody. Beyond that one `H2`, the rule costs no constraints |
 | Membership | Each real input's Merkle fold equals `transactions_root`. Both inputs are proven against the same root, so both sit in the same transactions tree |
 | Nullifiers | Each input's nullifier is derived from the note and equals the public `nullifier_1` or `nullifier_2` |
 | Distinct nullifiers | `nullifier_1 != nullifier_2`, so one note cannot fill both input slots and double its value |
@@ -126,7 +126,8 @@ The circuit does not range-check `withdraw_to`. The Chamber rejects `withdraw_as
 A proof is a statement about notes and roots. These checks need on-chain state, so `Chamber.handleZkp` makes them:
 
 - **Spent nullifiers.** The circuit cannot know whether a nullifier was already used. The Chamber reverts with `transaction is spent`.
-- **Known roots.** `transactions_root` must be a root some transactions tree has had, and `state_root` must be the current zkState root or one superseded less than 10 minutes ago.
+- **Known roots.** `transactions_root` must be a root some transactions tree has had, and `state_root` must be the current zkState root or one superseded less than 10 minutes ago. A Reserve's first registration retires superseded roots at once: see [Reserve messaging](/circuits/reserve-messaging/#messaging-on-and-off).
+- **The Chamber itself.** No public input carries the Chamber ID: `Chamber` is a private input. Two Chambers that shared a verifier would be kept apart only by their roots, since `transactions_root` must be in this Chamber's history and `state_root` names this Chamber's Reserves.
 - **The caller,** when `auth_done = 0`.
 - **The published commitments.** The six elements in calldata must fold to `auditor_commitments`.
 - **Address width** of the three address inputs.

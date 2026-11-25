@@ -82,7 +82,7 @@ The contracts return a flat array, level by level. The circuit takes the same va
 | Tree | Held by | Leaf | Capacity | Roots a spend may use |
 | --- | --- | --- | --- | --- |
 | Transactions | The Chamber, one tree per `treeId` | A note hash | 4^10 = 1,048,576 per tree. When a tree fills, the next one opens | Every root any transactions tree has had |
-| zkState | The Chamber | `H3(reserve, reserveConfig, usersRoot)`, one per Reserve | 4^10 Reserves | The current root, or one superseded less than 10 minutes ago |
+| zkState | The Chamber | `H3(reserve, reserveConfig, usersRoot)`, one per Reserve | 4^10 Reserves | The current root, or one superseded less than 10 minutes ago and not retired by a Reserve's first registration |
 | Registered users | Each Reserve | `H2(owner, userKeyExchange)`, one per member | 4^10 leaf slots, removed users included | Proven against the users root inside the Reserve's zkState leaf |
 
 Both inputs of a spend share one `transactions_root`, so two real notes in different transactions trees cannot be spent together.
@@ -94,4 +94,4 @@ Both inputs of a spend share one `transactions_root`, so two real notes in diffe
 | One node, selector included | 283 |
 | One membership lookup, 10 levels | 2,821 |
 
-Counts are from core's committed constraint snapshot. Every spend runs four folds, whatever its inputs: one per input note, one for the Reserve's zkState leaf and one for the sender's users leaf. A dummy's fold and the users fold at a Reserve without members are computed and their results ignored, so the circuit's shape never changes.
+Counts are from core's committed constraint snapshot. Each is measured on a wrapper circuit that also asserts the result equals a public input, so each includes that one constraint: ten levels cost 2,821, not ten times 283. Every spend runs four folds, whatever its inputs: one per input note, one for the Reserve's zkState leaf and one for the sender's users leaf. A dummy's fold and the users fold at a Reserve without members are computed and their results ignored, so the circuit's shape never changes.

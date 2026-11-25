@@ -152,4 +152,4 @@ Sequential, owner-bound identifiers, which remove the 256 cap and stop identifie
 
 ## Cost
 
-A keystream block costs 265 constraints however many of its elements are used: 265 for one or two plaintexts and 529 for three, from core's committed constraint snapshot. Messaging's identifier and five ciphertexts take two blocks. The snapshot has no entry for five plaintexts on its own.
+A keystream block costs the same however many of its elements are used. Core's committed constraint snapshot records 265 constraints for one or two plaintexts and 529 for three, each measured on a wrapper circuit that adds one equality assertion. Messaging's identifier and five ciphertexts take two blocks. The snapshot has no entry for five plaintexts on its own.

@@ -62,7 +62,7 @@ The keyword `0x6f776e6572` is the ASCII string "owner" (478745093490). A MIST Ad
 
 Every width uses the same parameters: the BN254 scalar field, 8 full rounds, 56 partial rounds and S-box exponent 5. The round counts are set in `core/circuits/gadgets/gadgets.go` and `core/circuits/lib/hash/poseidon2.go`. The exponent is gnark-crypto's fixed S-box degree for BN254.
 
-Each function feeds an input forward into one element of the final permutation state. The width-4 permutation serves four functions, told apart only by how the output is read:
+Each function feeds an input forward into one element of the final permutation state. The width-4 permutation serves three of them, `H4`, `HM4` and the keystream, told apart only by how the output is read:
 
 | Function | Width | Output | Constraints |
 | --- | --- | --- | --- |
@@ -72,7 +72,9 @@ Each function feeds an input forward into one element of the final permutation s
 | `HM4`, the Merkle node | 4 | `state[0] + state[1]`, over sorted children | 283, selector included |
 | Keystream block | 4 | `state[j + 1] - k`, for `j = 0, 1, 2` | 265 per block |
 
-Constraint counts are from core's committed constraint snapshot. Reading the output differently separates the domains with no extra input, tag or round: a collision across two uses would need one permutation state element to equal an input the other use feeds forward.
+Constraint counts are from core's committed constraint snapshot. Each is measured on a small wrapper circuit that also asserts the result equals a public input, so each figure includes that one constraint.
+
+The output read is the only thing that separates the three width-4 uses: there is no extra input, domain tag or round. The [specification](https://github.com/mistcash/mist/blob/main/spec/01_system_overview.md) gives the argument for why that is enough.
 
 `Fold2` reduces a vector to one element by chaining `H2` from the left: `Fold2(v) = H2(... H2(H2(v0, v1), v2) ..., vn)`.
 

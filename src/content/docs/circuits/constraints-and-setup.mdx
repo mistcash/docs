@@ -9,7 +9,7 @@ sidebar:
 
 ## Constraint counts
 
-Core commits the count of every circuit and gadget in `core/circuits/build/.constraint-snapshot`. The figures below are that file at core `cf1413d`. For these pages, core's `TestConstraintSnapshotMatchesCompile` was run against `cf1413d`: it compiles each entry that core builds and requires the committed count. It passed.
+Core commits the count of every circuit and gadget in `core/circuits/build/.constraint-snapshot`. The figures below are that file at core `cf1413d`. Core's `TestConstraintSnapshotMatchesCompile` compiles each entry that core builds and fails if any count differs from the committed file.
 
 | Circuit or gadget | Constraints |
 | --- | --- |
@@ -22,6 +22,8 @@ Core commits the count of every circuit and gadget in `core/circuits/build/.cons
 | `HashAndAdd`, one plaintext | 265 |
 | `HashAndAdd`, two plaintexts | 265 |
 | `HashAndAdd`, three plaintexts | 529 |
+
+Each gadget is measured on a small wrapper circuit that also asserts the result equals a public input, so each gadget figure includes that one constraint. Ten Merkle levels cost 2,821, not ten times 283.
 
 The count is the same for every spend. Dummy inputs, messaging on or off, and either `auth_done` mode change only witness values, never the circuit's shape. Each conditional rule is a `Select` or a conditional equality, and every Merkle fold is computed whether or not its result is used.
 
@@ -41,7 +43,7 @@ Groth16 over BN254 is not post-quantum. The circuit does no elliptic-curve opera
 
 ## Trusted setup
 
-The keys come from one call to gnark's `groth16.Setup` in `core/scripts/gen`, run by one party. No multi-party computation ceremony has been run for this circuit.
+The keys come from one run of gnark's BN254 Groth16 setup, `groth16_bn254.Setup` in `core/scripts/gen`. That is a single-party setup: no multi-party computation ceremony has been run for this circuit.
 
 Groth16 security rests on the setup's secret randomness being destroyed. Anyone who kept it could forge a proof for any public inputs, including a withdrawal, and the Chamber would accept it. With a single-party setup, users trust that one party.
 
@@ -62,7 +64,7 @@ The current keys are for development. The specification requires a multi-party c
 | Constraint snapshot | `core/circuits/build/.constraint-snapshot` |
 | Prover WASM | `core-deploy/dist/mist.wasm`, which embeds the constraint system and proving key |
 
-`scripts/gen` skips the setup when the compiled constraint system matches the stored one byte for byte, and reuses the stored keys. A new setup runs only when the constraints change.
+`scripts/gen` skips the setup when the compiled constraint system matches the stored one byte for byte and the stored keys load, and reuses them. Otherwise it runs a new setup.
 
 ## Changing the circuit
 
