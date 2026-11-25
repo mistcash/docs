@@ -16,7 +16,7 @@ Four contracts carry the protocol. The Chamber keeps the record and verifies spe
   caption="Who calls whom. The Chamber holds no assets. A Reserve's only outbound calls are asset transfers the Chamber asks for and fixed pushes to its own Chamber record."
 >
   <div class="mist-arch">
-    <div class="mist-arch__proof">
+    <div class="mist-arch__proof mist-arch__proof--stack">
       <span class="mist-chip">ChamberVerifier</span>
       <span class="mist-lane" aria-hidden="true"></span>
       <p class="mist-label">verifyProof, on every spend</p>
@@ -39,7 +39,7 @@ Four contracts carry the protocol. The Chamber keeps the record and verifies spe
       <Reserve name="Reserve C" rules={["Assets", "Users tree", "Permissions"]} />
     </div>
 
-    <div class="mist-arch__proof mist-arch__proof--end">
+    <div class="mist-arch__proof mist-arch__proof--stack mist-arch__proof--end">
       <span class="mist-chip">ManagerSigRegistrar</span>
       <span class="mist-lane" aria-hidden="true"></span>
       <p class="mist-label">addUser, on each Reserve that grants it USERS</p>
