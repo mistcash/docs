@@ -227,6 +227,10 @@
   flex: none;
   min-width: 2rem;
 }
+/* A closing row under the Reserves (a contract that calls into them) */
+.mist-arch__proof--end {
+  margin: 1.25rem 0 0;
+}
 .mist-arch__reserves {
   display: grid;
   gap: 1rem;

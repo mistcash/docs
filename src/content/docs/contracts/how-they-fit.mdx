@@ -1,0 +1,119 @@
+---
+title: How the contracts fit
+description: "How Chamber, Reserve, ManagerSigRegistrar and ChamberVerifier call each other, step by step for a deposit, a spend, a withdrawal, a registration and a removal."
+sidebar:
+  order: 1
+---
+
+import Figure from "../../../components/diagrams/Figure.astro";
+import Reserve from "../../../components/diagrams/Reserve.astro";
+import { Steps } from "@astrojs/starlight/components";
+
+Four contracts carry the protocol. The Chamber keeps the record and verifies spends, each Reserve holds its own assets, the registrar admits members, and the generated verifier checks proofs. Every call between them follows a fixed direction, set out below.
+
+<Figure
+  label="The four contracts. At the top, the ChamberVerifier, which the Chamber calls on every spend. In the middle, the Chamber, which holds the transactions trees, the nullifiers, the zkState tree, the pending deposits and the Reserve registry, and no assets. Below it, three Reserves, each holding its own assets, users tree and permissions, linked to the Chamber: the Chamber calls a Reserve to pull a deposit in or pay a withdrawal out, and a Reserve pushes its own record to the Chamber. At the bottom, the ManagerSigRegistrar, which calls addUser on each Reserve that grants it the USERS permission."
+  caption="Who calls whom. The Chamber holds no assets. A Reserve's only outbound calls are asset transfers the Chamber asks for and fixed pushes to its own Chamber record."
+>
+  <div class="mist-arch">
+    <div class="mist-arch__proof">
+      <span class="mist-chip">ChamberVerifier</span>
+      <span class="mist-lane" aria-hidden="true"></span>
+      <p class="mist-label">verifyProof, on every spend</p>
+    </div>
+
+    <div class="mist-record">
+      <p class="mist-label">Chamber · holds no assets</p>
+      <ul class="mist-record__parts">
+        <li class="mist-chip">Transactions trees</li>
+        <li class="mist-chip">Nullifiers</li>
+        <li class="mist-chip">zkState tree</li>
+        <li class="mist-chip">Pending deposits</li>
+        <li class="mist-chip">Reserve registry</li>
+      </ul>
+    </div>
+
+    <div class="mist-arch__reserves">
+      <Reserve name="Reserve A" rules={["Assets", "Users tree", "Permissions"]} />
+      <Reserve name="Reserve B" rules={["Assets", "Users tree", "Permissions"]} />
+      <Reserve name="Reserve C" rules={["Assets", "Users tree", "Permissions"]} />
+    </div>
+
+    <div class="mist-arch__proof mist-arch__proof--end">
+      <span class="mist-chip">ManagerSigRegistrar</span>
+      <span class="mist-lane" aria-hidden="true"></span>
+      <p class="mist-label">addUser, on each Reserve that grants it USERS</p>
+    </div>
+  </div>
+</Figure>
+
+## Calls between contracts
+
+| Caller | Callee | Function | Guard on the callee |
+| --- | --- | --- | --- |
+| Chamber | ChamberVerifier | `verifyProof(proof, input)` | None. A view that reverts on a bad proof |
+| Chamber | Reserve | `deposit(from, amount, asset)` | `onlyChamber` |
+| Chamber | Reserve | `withdraw(to, amount, asset)` | `onlyChamber` |
+| Chamber | Reserve | `new Reserve(...)` from `registerReserve` | Chamber owner only, on the Chamber |
+| Reserve | Chamber | `setReserveConfig(reserveConfig)` | Registered Reserve, its own record |
+| Reserve | Chamber | `setReserveStateRoot(stateRoot)` | Registered Reserve, its own record |
+| Reserve | Chamber | `setReserveScreener(screener)` | Registered Reserve, its own record |
+| Reserve | Chamber | `setReserveAssetMinDeposit(asset, minDeposit)` | Registered Reserve, its own record |
+| ManagerSigRegistrar | Reserve | `addUser(leaf)` | `USERS` permission |
+| ManagerSigRegistrar | Reserve | `registrations(leaf)`, `hasPermission(role, account)` | Views |
+| ManagerSigRegistrar | A `USERS` holder with code | `isValidSignature(digest, signature)` | ERC-1271 view |
+| Reserve | ERC-20 asset | `safeTransferFrom`, `safeTransfer`, `balanceOf` | The asset's own rules |
+
+The four Chamber setters act on `msg.sender`'s record, and the Chamber accepts them only from a Reserve it registered. A Reserve's role holders act on the Reserve, and the Reserve pushes the result.
+
+## Deposit
+
+<Steps>
+
+1. The depositor approves the Reserve, not the Chamber, to transfer the asset.
+
+2. The depositor calls `Chamber.deposit(reserve, ownerCommitment, amount, asset)`, or the overload with a trailing `refundTo`.
+
+3. The Chamber checks that inflows are open, the Reserve is registered, the asset is listed there and the owner commitment is below the field order.
+
+4. The Chamber calls `Reserve.deposit(msg.sender, amount, asset)`. The Reserve pulls the asset and returns the balance it actually gained.
+
+5. The Chamber checks the received amount against 2^120 and the Reserve's minimum, and hashes the note over the received amount.
+
+6. Without a screener, the note is appended at once and `deposit` returns `(noteHash, 0)`. With one, the note is queued under a new deposit id and `deposit` returns `(noteHash, depositId)`. The screener later calls `approveDeposits` or `rejectDeposits`, and the depositor or `refundTo` can call `reclaimDeposit` while it is pending or rejected.
+
+</Steps>
+
+## Spend and withdrawal
+
+<Steps>
+
+1. The prover builds a proof off-chain against a transactions root and a zkState root.
+
+2. The note owner, or anyone when `auth_done = 1`, calls `Chamber.handleZkp(proof, input, auditorCommitments)`.
+
+3. The Chamber calls `ChamberVerifier.verifyProof`, then checks the published commitments, both roots, the authorisation and both nullifiers.
+
+4. The Chamber marks both nullifiers spent, files any commitments, and appends both new notes. A private payment ends here. No assets move.
+
+5. If `withdraw_amount` is not 0, the Chamber calls `Reserve(withdraw_reserve).withdraw(withdraw_to, withdraw_amount, withdraw_asset)` as its last step, and the Reserve pays the recipient.
+
+</Steps>
+
+## Registration and removal
+
+<Steps>
+
+1. A member and the key holder agree a `userKeyExchange` off-chain. The member's leaf is `H2(owner, userKeyExchange)`.
+
+2. A `USERS` holder signs an EIP-712 `RegisterUser` message for the leaf, with a deadline.
+
+3. Anyone calls `ManagerSigRegistrar.registerUser(reserve, leaf, deadline, signer, signature)`. The registrar checks the signature and the signer's permission and calls `Reserve.addUser(leaf)`.
+
+4. The Reserve appends the leaf and pushes its new users root with `Chamber.setReserveStateRoot`. The Chamber updates the Reserve's zkState leaf, and the zkState root changes.
+
+5. To remove the member, a `USERS` holder calls `Reserve.removeUser(index)` with the index from `UserRegistered`. The Reserve zeroes the leaf and pushes the new root the same way.
+
+</Steps>
+
+A metadata change follows the same push: a `METADATA` holder calls `Reserve.updateAuditorKey`, and the Reserve calls `Chamber.setReserveConfig`. A `SCREENING` or `ASSETS` holder calls `Reserve.setScreener` or `Reserve.setAssetMinDeposit`, and the Reserve calls the matching Chamber setter.
