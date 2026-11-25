@@ -106,6 +106,8 @@ Whoever holds a signature chooses when, before the deadline, the registration la
 | An account with no code | ECDSA only. A malformed signature reverts with its reason: `Registrar: bad signature length` (not 65 bytes), `Registrar: malleable signature` (`s` above half the curve order) or `Registrar: bad signature v` (not 27 or 28) |
 | A contract | ECDSA first. If that does not recover the signer, ERC-1271: `isValidSignature(digest, signature)` must return `0x1626ba7e`. Only the first return word is read |
 
+The branch is chosen by whether `signer` has code when the call lands. An account with an EIP-7702 delegation has code, so a malformed ECDSA signature from it falls through to ERC-1271 instead of reverting with its reason.
+
 ECDSA is implemented in the contract because the Paris EVM target lacks `mcopy`. The signature is ECDSA over secp256k1 and is not post-quantum.
 
 :::caution[ERC-1271 signers are trusted]
@@ -126,5 +128,7 @@ The signed message carries `registrations`, and `addUser` increments it on every
 
 - A signature registers the leaf at most once. After it lands, the count has moved and the digest no longer matches.
 - A member who was removed cannot return with any signature collected before their latest registration. Re-registering needs a new signature.
+
+A signature made while the member is registered carries the current count, so it stays valid after a removal and can re-register the member until its deadline. Do not sign ahead for a registered leaf. `revoke` is the only way to cancel a signature before its deadline.
 
 Removing a member is not done here: a `USERS` holder calls `Reserve.removeUser(index)` directly. See [Reserve](/contracts/reserve/#users-tree).

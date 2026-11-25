@@ -33,7 +33,9 @@ The verifier decides which spends are valid, so replacing it is the most powerfu
 2. Users and monitors compare the published code hash with a build of the expected verifier.
 3. After the eta, the owner calls `executeVerifierUpdate()`. It reverts with `verifier timelock` before the eta and with `verifier code changed` if the code at the address no longer matches the hash. It emits `VerifierUpdated(verifier, codehash)`.
 
-`cancelVerifierUpdate()` drops a pending proposal and emits `VerifierUpdateCancelled`. The 7-day delay is longer than the 3-day maximum spend pause, so a guardian pause cannot cover the whole window of a queued change: users can always exit first.
+`cancelVerifierUpdate()` drops a pending proposal and emits `VerifierUpdateCancelled`. The 7-day delay is longer than the 3-day maximum spend pause, so a guardian pause alone cannot cover the whole window of a queued change. A user who can spend has time to exit first. A member removed from a Reserve with members cannot spend there, so that user has no exit until exit spends, which are **Planned**.
+
+The code-hash check pins the verifier's code, not its behaviour. A verifier whose `verifyProof` read mutable external state would pass it, so reviewers read the proposed code, not only its hash.
 
 ## Ownership timelock
 
@@ -41,7 +43,7 @@ The Chamber uses OpenZeppelin's `Ownable2Step` with a delay:
 
 - `transferOwnership(newOwner)` sets the pending owner and an eta 7 days out, and emits `OwnershipTransferQueued(newOwner, eta)`. Passing zero cancels, with eta 0.
 - The pending owner calls `acceptOwnership()` after the eta, or it reverts with `ownership timelock`.
-- `renounceOwnership()` always reverts with `renounce disabled`.
+- `renounceOwnership()` always reverts: with `renounce disabled` for the owner, and with `OwnableUnauthorizedAccount` for anyone else.
 
 ## Guardian pauses
 
@@ -51,7 +53,7 @@ The Chamber uses OpenZeppelin's `Ownable2Step` with a delay:
 | `pauseSpends` | `handleZkp`: private payments and withdrawals | 3 days | Expiry, or `unpauseSpends` by the guardian or the owner |
 
 - **Cooldown.** A new spend pause can start only 7 days after the previous one ended. Ending a pause early starts the cooldown from that moment. Rotating the guardian does not reset it.
-- **Never paused.** `reclaimDeposit` and `rejectDeposits`, so a pause never traps a queued deposit.
+- **Never paused.** `reclaimDeposit` and `rejectDeposits`, so a pause never traps a queued deposit. Neither pause touches governance or registration either: `registerReserve`, every Reserve function and the registrar keep working.
 
 ## Security notes
 
@@ -60,7 +62,7 @@ These are the trust assumptions, stated plainly.
 | Holder | Worst case if acting against users |
 | --- | --- |
 | Chamber owner | Proposes a verifier that accepts any proof. After 7 days it could authorise the withdrawal of every asset in every Reserve, because no on-chain ledger checks withdrawals against notes. The defence is the published code hash and the 7-day window to exit. The owner can also make itself guardian with `setGuardian` at once |
-| Guardian | Pauses deposits with no time limit, until the owner unpauses or replaces it. Halts all spends, withdrawals included, for up to 3 days, then must wait 7 days after that pause ends before the next |
+| Guardian | Pauses deposits with no time limit. Replacing the guardian does not end the pause: the owner first rotates the guardian with `setGuardian`, then calls `unpauseInflows`. Halts all spends, withdrawals included, for up to 3 days, then must wait 7 days after that pause ends before the next |
 | Whoever ran the trusted setup | Could forge a proof for any public inputs, including a withdrawal, if they kept the setup's secret randomness. The keys come from a single-party setup. See [Circuits](/circuits/) |
 | Reserve admin or `USERS` | Decides who can spend at a Reserve with members. Removing a member, or never registering a holder, leaves that holder's notes unspendable there. An exit spend for that case is **Planned** |
 | `METADATA` | Each update replaces the shared zkState root. Proofs against the old root stay valid for 10 minutes |
@@ -75,4 +77,4 @@ Further limits that hold for every user:
 - **Identifiers are first come, first served** across every Reserve.
 - **Compliance is experimental.** Screening is off-chain and on entry only.
 
-Review findings and their status are tracked in the specification's implementation status file. These pages claim no external audit.
+These pages claim no external audit.

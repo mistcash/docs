@@ -37,7 +37,7 @@ An unscreened deposit emits only `NoteAppended`.
 | --- | --- |
 | `ReserveRegistered(address indexed reserve, address indexed admin, uint256 leafIndex, uint256 reserveConfig, uint256 stateRoot)` | The owner registers a Reserve. `stateRoot` is 0 |
 | `ReserveConfigUpdated(address indexed reserve, uint256 reserveConfig, uint256 stateRoot)` | A Reserve's zkState leaf changes, from a config update or a users-root update |
-| `ZkStateRootUpdated(uint256 indexed newRoot, uint256 previousRootExpiresAt)` | The zkState root changes. `previousRootExpiresAt` is when the old root stops being accepted, 0 if there was none |
+| `ZkStateRootUpdated(uint256 indexed newRoot, uint256 previousRootExpiresAt)` | A Reserve is registered or pushes an update. `previousRootExpiresAt` is when the old root stops being accepted, or 0 if there was no old root or the root did not change |
 | `ZkStateHistoryRetired(address indexed reserve, uint256 cutoff)` | A Reserve's users root first becomes non-zero, and every superseded root is retired |
 | `ReserveScreenerSet(address indexed reserve, address indexed screener)` | A Reserve sets or clears its screener |
 | `ReserveAssetMinDepositSet(address indexed reserve, address indexed asset, uint256 minDeposit)` | A Reserve lists an asset, changes its minimum, or delists it with 0 |
@@ -113,11 +113,12 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `verifier timelock` | Execute before the eta |
 | `verifier code changed` | The code at the proposed address no longer matches its hash |
 | `ownership timelock` | Accept before the eta |
-| `renounce disabled` | Any call to `renounceOwnership` |
+| `renounce disabled` | `renounceOwnership` called by the owner |
 | `Chamber: only guardian`, `Chamber: only guardian or owner` | A pause function from another caller |
 | `Chamber: spend pause cooldown` | A spend pause within 7 days of the last one ending |
 | `Chamber: spends not paused` | `unpauseSpends` when no pause is running |
 | `merkle leaf index out of range` | `txTreeOf` or `merkleProof` past the last leaf |
+| `merkle tree capacity exceeded` | `registerReserve` when the zkState tree holds 4^10 Reserves. Transactions trees roll over instead |
 
 ### Reserve
 
@@ -134,6 +135,7 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `Reserve: no user at index` | `removeUser` past the last leaf or on a zeroed leaf |
 | `Reserve: last user` | `removeUser` that would empty the users tree |
 | `Reserve: auditor key not in field` | A key element at or above the field order |
+| `merkle tree capacity exceeded` | `addUser` when all 4^10 leaf slots of the users tree are used |
 | `Reserve: zero admin`, `Reserve: zero chamber` | Constructor with a zero address |
 
 ### ManagerSigRegistrar
@@ -153,5 +155,6 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `ProofInvalid()` | `ChamberVerifier`: the pairing check failed or a point is not on its curve |
 | `PublicInputNotInField()` | `ChamberVerifier`: a public input is at or above the field order |
 | `OwnableUnauthorizedAccount(address)` | `Ownable`: an owner function from another caller, or `acceptOwnership` from anyone but the pending owner |
+| `OwnableInvalidOwner(address)` | `Ownable`: the Chamber constructor with a zero owner |
 | `ReentrancyGuardReentrantCall()` | `ReentrancyGuard`: a reentrant call into a guarded Chamber function |
-| `SafeERC20FailedOperation(address)` | `SafeERC20`: an asset transfer returned false |
+| `SafeERC20FailedOperation(address)` | `SafeERC20`: an asset transfer returned false or a malformed value, or the asset has no code. An asset that reverts bubbles up its own revert data |

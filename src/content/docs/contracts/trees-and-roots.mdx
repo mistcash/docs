@@ -53,7 +53,7 @@ The zkState tree has one leaf per Reserve:
 leaf = H3(reserve, reserveConfig, usersRoot)
 ```
 
-`reserveConfig` is `H2(keyHash, keyInputPoint)`, the Reserve's opaque metadata, and `usersRoot` is the root of its registered-users tree. `registerReserve` appends the leaf with `usersRoot = 0`, and the Reserve's pushes update it in place. Every update makes a new root current and emits `ZkStateRootUpdated(newRoot, previousRootExpiresAt)`.
+`reserveConfig` is `H2(keyHash, keyInputPoint)`, the Reserve's opaque metadata, and `usersRoot` is the root of its registered-users tree. `registerReserve` appends the leaf with `usersRoot = 0`, and the Reserve's pushes update it in place. Every push emits `ZkStateRootUpdated(newRoot, previousRootExpiresAt)`. When a push leaves the root unchanged, nothing expires and `previousRootExpiresAt` is 0.
 
 | View | Returns |
 | --- | --- |

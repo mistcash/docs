@@ -53,7 +53,7 @@ The script reads its settings from the environment:
 | `DEV_FIXTURES` | `false` | Deploy a development Reserve, a mock asset and one registered user |
 | `USER_KEY_EXCHANGE` | 0 | The development user's key exchange. Required with `DEV_FIXTURES` |
 
-On chain ID 1, `validate` refuses development fixtures and the fixture key exchange `0x6b6579`, and requires `CHAMBER_OWNER` to be set, to differ from the deployer and to have code.
+On chain ID 1, `validate` refuses development fixtures and the fixture key exchange `0x6b6579`, and requires `CHAMBER_OWNER` to be set, to differ from the deployer and to have code. On any other chain these rules do not apply: an unset `CHAMBER_OWNER` leaves the deployer's key as the owner, and `GUARDIAN` is not checked.
 
 The script then broadcasts, in order:
 
@@ -69,7 +69,7 @@ It writes the address book to `deployments/<chainId>.json`, with the Chamber, ve
 `Poseidon2` in `lib/Poseidon.sol` exposes `public` functions, so it is deployed as its own library contract and linked into the contracts that hash.
 
 :::caution[Development fixtures are not for real funds]
-The development Reserve has a fixed auditor key (789, 987), a mock asset, no screener, and the deployer as admin. Its registered user's key exchange is whatever `USER_KEY_EXCHANGE` holds. The fixture value `0x6b6579` is public, so anyone can decrypt that user's messaging.
+The development Reserve has a fixed auditor key (789, 987), a mock asset, no screener, and the deployer as admin. Its registered user's key exchange is whatever `USER_KEY_EXCHANGE` holds. The fixture value `0x6b6579` is public, so anyone can derive that user's messaging keys and decrypt their spends.
 :::
 
 ## After deployment

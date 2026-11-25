@@ -72,7 +72,7 @@ function addUser(uint256 leaf) external onlyPermission(USERS) returns (uint256 i
 function removeUser(uint256 index) external onlyPermission(USERS);
 ```
 
-A member's leaf is `H2(owner, userKeyExchange)`, computed off-chain. Only the hash goes on-chain.
+A member's leaf is `H2(owner, userKeyExchange)`, computed off-chain. Only the hash goes on-chain. The tree holds 4^10 = 1,048,576 leaf slots. Removals do not free slots, so every registration, including a re-registration, uses one, and `addUser` reverts with `merkle tree capacity exceeded` once all are used.
 
 - **`addUser`** requires a non-zero leaf below the field order that is not currently registered. It appends the leaf, increments `registrations(leaf)`, emits `UserRegistered(leaf, index, root)` and pushes the new root with `Chamber.setReserveStateRoot`.
 - **`removeUser`** takes the index from `UserRegistered`. It zeroes the leaf, clears `isRegisteredUser(leaf)`, emits `UserRemoved(index, leaf, root)` and pushes the new root. It reverts with `Reserve: no user at index` for an index past the last leaf or an already-zero leaf, and with `Reserve: last user` if the users root would become zero. A zero users root would switch messaging off.
@@ -84,7 +84,7 @@ A user removed from a Reserve with members cannot spend or withdraw there while 
 | View | Returns |
 | --- | --- |
 | `registeredUsersRoot()` | The users root, zero while empty |
-| `registeredUsersCount()` | Leaf slots used, removed users included |
+| `registeredUsersCount()` | Leaf slots used, removed users included. A removed slot is never reused |
 | `registeredUserProof(index)` | The 30-element membership proof for the leaf at `index` |
 | `isRegisteredUser(leaf)` | Whether the leaf is currently in the tree |
 | `registrations(leaf)` | How many times the leaf has been registered |

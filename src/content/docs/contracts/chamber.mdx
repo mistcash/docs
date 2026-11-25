@@ -39,7 +39,7 @@ function deposit(
 ) external returns (uint256 noteHash, uint256 depositId);
 ```
 
-A deposit takes no proof. The depositor approves the Reserve, not the Chamber, for `amount` of the asset. The Chamber then checks, in order:
+A deposit takes no proof. The depositor approves the Reserve, not the Chamber, for `amount` of the asset. The `refundTo` overload first rejects a zero `refundTo`. The Chamber then checks, in order:
 
 1. Inflows are not paused (`Chamber: inflows paused`).
 2. The Reserve is registered (`reserve is not registered`).
@@ -58,7 +58,7 @@ The note binds the received amount, so an asset that takes a fee on the incoming
 
 `refundTo` names who receives a reclaim. It cannot be zero (`Chamber: zero refundTo`). The four-argument form uses the depositor. A router that deposits for a user names the user, so a rejected deposit is never stranded behind a contract that cannot reclaim. `refundTo` matters only for a queued deposit.
 
-An owner commitment is single-use per Reserve, asset and amount: a second deposit with the same values gives a note hash that is already recorded, and reverts. Use a fresh blinding for every deposit.
+An owner commitment is single-use per Reserve, asset and amount. Once a note is in a tree, a second deposit with the same values gives the same note hash and reverts. At a screened Reserve, an identical deposit made while the first is still queued queues beside it, and approval admits only the first. Use a fresh blinding for every deposit.
 
 ## Screening
 
@@ -110,7 +110,7 @@ One function settles every spend: a private payment, a withdrawal or both. It ru
 
 - **No assets move on a private payment.** The withdrawal call is last, after every state write.
 - **Every spend appends two notes,** zero-amount outputs included, so spends look alike.
-- **The Reserve is not looked up.** The circuit binds `withdraw_reserve` to the custody of the spent notes, and a note enters a tree only through a registered Reserve's deposit.
+- **The Reserve is not looked up.** The circuit binds `withdraw_reserve` to the custody of the spent notes. Every note under a Reserve's custody descends from deposits at that Reserve, which the Chamber registered: a spend's outputs inherit its inputs' custody.
 - **A filed spend** is stored as `privateTxCommitments(privateTxKey)`, which returns `(newNote1, newNote2, blockNumber, txIndex)`. `txIndex` is `newNote1`'s global index, and `newNote2` follows it. An identifier can be filed once, across every Reserve.
 - **Calling `handleZkp`** with `auth_done = 1` is open to anyone, so a relayer can submit it. Nothing in core pays the relayer. A relayer fee is **Planned**.
 
