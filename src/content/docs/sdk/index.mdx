@@ -31,8 +31,8 @@ Version 0.6 is a rewrite and ships on the `beta` tag. The `latest` tag is the le
 `MistClient` takes an address book, a chain adapter and a prover. It covers each role in the protocol.
 
 - **Depositor.** `deposit` approves a Reserve and deposits into a private note. `refreshScreening` and `reclaimDeposit` follow a deposit through a screener.
-- **Member.** `join` runs the key exchange with a Reserve's manager and registers the member. `spend` builds the proof and submits a private payment or a withdrawal.
-- **Reserve manager.** `registerReserve`, `setRegistrar`, `setReserveScreener` and `updateAuditorKey` administer a Reserve. `openPayload` reads a member's spend.
+- **Member.** `join` runs the key exchange with the Reserve's key holder and registers the member. `spend` builds the proof and submits a private payment or a withdrawal.
+- **Reserve operator.** `registerReserve`, `setReserveScreener` and `updateAuditorKey` administer a Reserve. `openPayload` reads a member's spend.
 - **Screener.** `queuedDeposits`, `approveDeposits` and `rejectDeposits` decide the deposits waiting at a Reserve.
 
 ```ts
@@ -44,6 +44,10 @@ await client.spend({ id: "me (MIST)", amount: 0n, withdraw: amount, withdrawTo: 
 Registration uses a post-quantum key exchange. The SDK ships X-Wing, a hybrid of ML-KEM-768 and X25519, as `encapsulate`, `decapsulate` and `deriveUkx`. The protocol does not fix the exchange, so a Reserve can use another.
 
 ## Caveats
+
+:::caution[The published beta predates the contract hardening]
+`0.6.0-beta.1` was built against the earlier contract interface. It calls `Chamber.setVerifier`, `Chamber.setReserveScreener(reserve, screener)`, `Reserve.setRegistrar` and a three-argument `registerUser`. None of these exist in the contracts in mistcash/core `main`: the verifier changes through a timelock, a Reserve sets its own screener, the registrar holds a permission, and `registerUser` takes a deadline and a signer. Calls such as `join` and `setReserveScreener` fail against them until an SDK release follows the contracts.
+:::
 
 :::caution[Before building on the SDK]
 - `secretOf` derives a MIST secret from a private key and is for development only. A browser wallet never exposes its key, so an application must derive the secret from a wallet signature.
