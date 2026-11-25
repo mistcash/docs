@@ -26,21 +26,22 @@ A spend consumes up to two notes and creates two new ones. It can also pay part 
 
 Two kinds of contract split the work.
 
-- A **Reserve** holds the assets of the notes in its custody and stands for one compliance rule set. Its manager decides who registers and who screens deposits.
+- A **Reserve** holds the assets of the notes in its custody and stands for one compliance rule set. Its admin grants the permissions that run it: registering users, screening deposits, listing assets and updating metadata.
 - The **Chamber** keeps the record of every note, the spent markers and the list of Reserves. It verifies each proof and holds no assets.
 
 Funds under different rules never mix. Private payments from every Reserve are recorded in the same Chamber, so they look alike.
 
 ## Compliance per Reserve
 
-A Reserve can switch on three rules.
+A Reserve can switch on four rules.
 
-- **Registration.** At a Reserve with members, only registered users can spend.
+- **Asset list.** A Reserve accepts only the assets its admin lists, each with a minimum deposit.
+- **Registration.** At a Reserve with members, only registered users can spend. A registered user can later be removed.
 - **Deposit screening.** A screener approves or rejects each deposit before its note joins the record. A depositor can always reclaim a deposit that is pending or rejected.
-- **Manager visibility.** At a Reserve with members, every spend publishes its details encrypted for the manager: the sender, the asset and the amounts. Recipients appear only as commitments.
+- **Key-holder visibility.** At a Reserve with members, every spend publishes its details encrypted for whoever holds the members' key exchanges: the sender, the asset and the amounts. Recipients appear only as commitments.
 
 :::note[Scope of these docs]
-These pages follow the protocol specification, which is the document of record. Where the specification describes something that is not built yet, the page says Planned. The protocol is pre-production: its keys come from a single-party setup, and the Chamber owner can replace the verifier at any time.
+These pages follow the protocol specification, which is the document of record, and the contracts in mistcash/core `main`. Where the specification describes something that is not built yet, the page says Planned. The protocol is pre-production: its keys come from a single-party setup.
 :::
 
 ## Where to go next

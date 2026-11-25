@@ -27,7 +27,7 @@ The Chamber decodes the public inputs in this order. The count and order are a c
 | 3 | `new_note_1` | First new note hash to append |
 | 4 | `new_note_2` | Second new note hash to append |
 | 5 | `transactions_root` | The transactions-tree root the inputs are proven against |
-| 6 | `state_root` | The zkState root, shared by every Reserve |
+| 6 | `state_root` | The zkState root, shared by every Reserve. The Chamber accepts the current root, and a superseded one for 10 minutes |
 | 7 | `withdraw_amount` | The optional withdrawal amount, zero without one |
 | 8 | `withdraw_asset` | The asset withdrawn |
 | 9 | `withdraw_reserve` | The Reserve that pays out |
@@ -47,7 +47,7 @@ The Chamber decodes the public inputs in this order. The count and order are a c
 - **Owner authorisation.** With `auth_done = 1`, each input's owner is `H2(owner_secret, "owner")`. With `auth_done = 0`, both inputs share one owner and it equals the public `owner`.
 - **Withdrawal pinning.** `withdraw_asset` and `withdraw_reserve` are zero without a withdrawal, and the spend's own asset and Reserve with one.
 - **Reserve state.** The Reserve's zkState leaf is in `state_root` on every spend.
-- **Reserve messaging.** At a Reserve with registered users, the sender is a member and the spend publishes its details encrypted for the manager.
+- **Reserve messaging.** At a Reserve with registered users, the sender is a member and the spend publishes its details encrypted for the key holder.
 
 The circuit does not check whether a nullifier was already spent. The Chamber does, when it settles the spend.
 
