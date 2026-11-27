@@ -1,0 +1,129 @@
+---
+title: Reserve administration
+description: "Permissions, admin handover, removing members, revoking registrations, the screener and the asset list, as MistClient methods."
+sidebar:
+  order: 8
+---
+
+A Reserve has one admin and four permissions. The client wraps each administrative call. Every action is taken on the Reserve, which pushes the result to the Chamber.
+
+## Permissions
+
+The admin is named at `registerReserve` and holds all four permissions. Each can also be granted to any number of accounts. `RESERVE_ROLES[role]` is the `bytes32` id, `keccak256(name)`.
+
+| Role | Lets an account | Client method |
+| --- | --- | --- |
+| `ASSETS` | List an asset with a minimum deposit, or delist it with 0 | `setAssetMinDeposit(reserve, asset, minDeposit)` |
+| `USERS` | Sign registrations and remove members | `removeUser(reserve, index)`, `revokeRegistration(reserve, leaf)` |
+| `METADATA` | Rotate the auditor key | `updateAuditorKey(reserve, keyHash, keyInputPoint)` |
+| `SCREENING` | Set the deposit screener | `setReserveScreener(reserve, screener)` |
+
+The admin alone grants and revokes. Granting the zero address reverts. A repeat grant, or a revoke with no grant, is a no-op. The admin's own permissions are implicit and cannot be revoked.
+
+```ts
+import { MistClient, type AddressBook, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const book: AddressBook;
+declare const reserve: Hex;
+declare const signerService: Hex;
+
+// The registrar needs USERS before anyone can join
+await client.grantPermission(reserve, "USERS", book.registrar);
+// An account whose registration signatures count
+await client.grantPermission(reserve, "USERS", signerService);
+
+await client.revokePermission(reserve, "USERS", signerService);
+console.log(await client.hasPermission(reserve, "USERS", signerService)); // false
+```
+
+`hasPermission(reserve, role, account)` is true for the admin on every role. A `USERS` revoke moves the account's epoch for that role, which voids every registrar signature the account made.
+
+## Admin handover
+
+```ts
+import { MistClient, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const nextAdminClient: MistClient;
+declare const reserve: Hex;
+declare const nextAdmin: Hex;
+
+await client.transferAdmin(reserve, nextAdmin);
+await nextAdminClient.acceptAdmin(reserve);
+```
+
+The handover has two steps. The admin nominates, and the nominee accepts. Nominating the zero address cancels. On acceptance:
+
+- Explicit grants survive. The new admin reviews them and revokes stale ones.
+- The old admin's implicit permissions end, and its epochs move, so the registrar signatures it made stop working.
+
+## Members
+
+`removeUser(reserve, index)` zeroes a member's leaf and pushes the new users root to the Chamber. The index comes from the `UserRegistered` event or from `registeredUserLeaves(reserve)`.
+
+```ts
+import { MistClient, type Hex } from "@mistcash/sdk";
+import type { FullProverAdapter } from "@mistcash/sdk/prover";
+
+declare const client: MistClient;
+declare const prover: FullProverAdapter;
+declare const reserve: Hex;
+declare const mistAddr: string; // the member's MIST Address
+declare const ukx: string; // the member's key exchange
+
+const leaf = BigInt(await prover.hash2(mistAddr, ukx));
+const leaves = await client.registeredUserLeaves(reserve);
+const index = leaves.indexOf(leaf.toString());
+if (index < 0) throw new Error("member not found");
+
+await client.removeUser(reserve, BigInt(index));
+```
+
+- Removal takes full effect within 10 minutes, the zkState root grace.
+- Removing the last user reverts with `Reserve: last user`.
+- A removed member's `spend` fails with `This reserve no longer lists you as a member: join it again.` Re-joining needs a new signature, because removal moves the leaf's nonce.
+- A spend at a Reserve with members proves against every slot, removed ones included. `getEvents` must serve all of the Reserve's `UserRegistered` and `UserRemoved` events.
+
+`revokeRegistration(reserve, leaf)` voids every outstanding registrar signature for `leaf`, by any signer. It takes no deadline and needs `USERS`.
+
+## Screener, assets and key
+
+`setReserveScreener(reserve, screener)` needs `SCREENING`. It calls `Reserve.setScreener`, which tells the Chamber. The zero address means no screener. [Deposits](/sdk/deposits/) covers the screener's own calls.
+
+`setAssetMinDeposit(reserve, asset, minDeposit)` needs `ASSETS`. A minimum above 0 lists the asset, and 0 delists it. Nothing is depositable until listed.
+
+`updateAuditorKey(reserve, keyHash, keyInputPoint)` needs `METADATA`. It rotates the Reserve's auditor key and config.
+
+```ts
+import { MistClient, type AddressBook, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const book: AddressBook;
+declare const reserve: Hex;
+declare const screener: Hex;
+
+await client.setAssetMinDeposit(reserve, book.token, 10n ** 15n);
+await client.setReserveScreener(reserve, screener);
+```
+
+## Reading a member's spend
+
+The key holder opens the commitments of a member's spend with `openPayload({ reserve, commitments })`. It tries each key exchange in `client.ukx` for that Reserve against `prover.decrypt`, and returns `{ owner, keyIndex, plaintext }` for the first key exchange that opens them, or `null`. It throws when the prover has no `decrypt`.
+
+```ts
+import { MistClient, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const reserve: Hex;
+declare const commitments: string[]; // from a spend
+
+const opened = await client.openPayload({ reserve, commitments });
+console.log(opened?.owner, opened?.plaintext);
+```
+
+## Chamber owner
+
+`registerReserve(admin, keyHash, keyInputPoint)` deploys and registers a Reserve, and only the Chamber owner can call it.
+
+The SDK does not wrap the guardian's pauses, the verifier and ownership timelocks or `setGuardian`. Those are owner and guardian operations, done through a Safe. Their ABIs are in `ABIS.Chamber`, and the client only reads the pause flags.
