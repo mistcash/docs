@@ -1,0 +1,85 @@
+---
+title: Trees and roots
+description: "The Chamber's transactions trees with rollover, how to fetch a note's index, tree leaves and proof, and the zkState tree with its 10-minute root grace window."
+sidebar:
+  order: 3
+---
+
+The Chamber keeps two kinds of Merkle tree: transactions trees of notes, and one zkState tree with a leaf per Reserve. Both are depth-10, 4-ary `Merkle4` trees whose nodes match the circuit's `HM4`, so a root the Chamber computes is a root a proof can use.
+
+## Transactions trees
+
+Every note, deposited or created by a spend, is appended to `txArray` and to the current transactions tree. A tree holds `txTreeCapacity()` leaves, which is 4^10 = 1,048,576. When it fills, the next tree opens.
+
+| Global index `i` | Tree | Position in the tree |
+| --- | --- | --- |
+| Any | `i / capacity` | `i % capacity` |
+
+- **Rollover.** The leaf at a global index divisible by the capacity opens a new tree. For every tree after the first, the Chamber emits `TxTreeOpened(treeId, firstIndex)`.
+- **Roots stay valid.** Every root any transactions tree has had is recorded in `merkleRoots` and never retired. A proof built against an older root still verifies after the tree has grown, and a note in a full tree stays spendable.
+- **One tree per spend.** A spend proves both inputs against one `transactions_root`, so two real notes in different trees cannot be spent together. To merge them, the owner first spends one note with a dummy second input, which lands its outputs in the current tree.
+- **A spend can straddle trees.** If `new_note_1` fills the last slot of a tree, `new_note_2` opens the next one.
+- **`NoteAppended(index, note, root)`** is emitted for every leaf, with `root` the new root of that leaf's tree.
+
+## Fetching a note's leaves and proof
+
+A prover needs a note's tree and a 30-element proof against a root of that tree.
+
+| View | Returns |
+| --- | --- |
+| `noteIndexPlusOne(note)` | 1 plus the note's first global index, 0 if it was never appended |
+| `txTreeOf(index)` | `(treeId, localIndex)` for a global index |
+| `merkleProof(index)` | The 30-element proof for the leaf at a global index, against the current root of its tree |
+| `txTreeRoot(treeId)` | The current root of one tree |
+| `merkleRoot()` | The current root of the latest tree |
+| `currentTxTreeId()` | The id of the latest tree |
+| `txCount()` | The number of leaves across every tree |
+| `getTxArray(offset, limit)` | Up to `limit` leaves from global index `offset` |
+| `txArray(i)` | One leaf |
+| `merkleRoots(root)` | Whether a root is accepted |
+
+Two ways to build a proof:
+
+1. **Ask the Chamber.** Read the index with `noteIndexPlusOne(note) - 1`, then call `merkleProof(index)`. The proof matches `txTreeRoot(treeId)` at the block it was read.
+2. **Rebuild the tree.** Tree `t` holds global indices `t * capacity` up to `(t + 1) * capacity - 1`. Read them with `getTxArray(t * capacity, limit)` in pages, or from `NoteAppended` events, and build the tree off-chain with the same `HM4` rule. A wallet that rebuilds keeps working as the tree grows, and reveals nothing about which note it wants.
+
+Asking the Chamber for one note's proof tells the node operator which note the caller is interested in. Rebuilding the tree from all its leaves does not.
+
+## The zkState tree
+
+The zkState tree has one leaf per Reserve:
+
+```text
+leaf = H3(reserve, reserveConfig, usersRoot)
+```
+
+`reserveConfig` is `H2(keyHash, keyInputPoint)`, the Reserve's opaque metadata, and `usersRoot` is the root of its registered-users tree. `registerReserve` appends the leaf with `usersRoot = 0`, and the Reserve's pushes update it in place. Every push emits `ZkStateRootUpdated(newRoot, previousRootExpiresAt)`. When a push leaves the root unchanged, nothing expires and `previousRootExpiresAt` is 0.
+
+| View | Returns |
+| --- | --- |
+| `zkStateRoot()`, `currentZkStateRoot()` | The current root |
+| `isValidZkStateRoot(root)` | Whether a spend may use the root now |
+| `zkStateRootExpiresAt(root)` | When a superseded root stops being accepted |
+| `zkStateHistoryCutoff()` | Superseded roots expiring at or before this are not accepted |
+| `zkStateLeaf(index)` | One leaf |
+| `reserveConfigs(reserve)` | `(leafIndex, reserveConfig, stateRoot)` for one Reserve |
+
+The Chamber has no zkState proof view. A prover reads the leaves with `zkStateLeaf`, at the `leafIndex` each `ReserveRegistered` event gives, or recomputes them from `ReserveRegistered` and `ReserveConfigUpdated`, and builds the proof off-chain.
+
+## The grace window
+
+The zkState root is shared by every Reserve, so a change at any Reserve replaces it. A proof built against the previous root would fail if only the current root counted. The Chamber therefore accepts a superseded root for `ZK_STATE_ROOT_GRACE`, 10 minutes:
+
+- **Accepted:** the current root, and any root superseded less than 10 minutes ago, unless a Reserve's messaging switched on at or after the moment it was superseded.
+- **Rejected:** any other root.
+
+Each superseded root gets its own expiry, `block.timestamp + 10 minutes` at the moment it is replaced. When several changes land in a short time, every root replaced in the last 10 minutes stays valid.
+
+Two events cut the window short or depend on it:
+
+| Event | Effect |
+| --- | --- |
+| A Reserve's users root first becomes non-zero | The Chamber sets `zkStateHistoryCutoff` to now plus 10 minutes and emits `ZkStateHistoryRetired(reserve, cutoff)`. Every root superseded up to that moment stops being accepted at once, at every Reserve. Those roots hold a zero users root for that Reserve and would let a spend skip messaging |
+| A user is removed | The new root lacks the user's leaf, but the previous root still holds it. The removal takes full effect when that root leaves the window, at most 10 minutes later |
+
+A prover that sees `ZkStateRootUpdated` after building a proof has 10 minutes to land it, or rebuilds against the new root.

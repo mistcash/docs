@@ -227,6 +227,21 @@
   flex: none;
   min-width: 2rem;
 }
+/* A closing row under the Reserves (a contract that calls into them) */
+.mist-arch__proof--end {
+  margin: 1.25rem 0 0;
+}
+/* A row whose first item is a wide chip: chip over label at phone width */
+@media (max-width: 39.99rem) {
+  .mist-arch__proof--stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .mist-arch__proof--stack .mist-lane {
+    display: none;
+  }
+}
 .mist-arch__reserves {
   display: grid;
   gap: 1rem;

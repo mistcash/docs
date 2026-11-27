@@ -1,0 +1,80 @@
+---
+title: Roles and security
+description: "Every privileged role in the MIST contracts and what it can and cannot do: the Chamber owner and its timelocks, the guardian's pauses, the Reserve admin and permissions, the screener, and the trust each one carries."
+sidebar:
+  order: 6
+---
+
+Each power over the contracts belongs to a named role, and most are bounded by a delay, a cooldown or the depositor's right to reclaim. This page lists every role, the timelocks and pauses, and plainly what a role holder acting against users could do.
+
+## Roles and permissions
+
+| Role | Held by | Can | Cannot |
+| --- | --- | --- | --- |
+| Chamber owner | One address, set at construction. A Safe for a live Chamber | `registerReserve`, `setGuardian`, `proposeVerifier`, `executeVerifierUpdate`, `cancelVerifierUpdate`, `transferOwnership`, `unpauseInflows`, `unpauseSpends` | Renounce ownership. Pause anything without being the guardian. Act on a Reserve after registering it |
+| Guardian | One address, named at construction or set by the owner. May be zero | `pauseInflows`, `unpauseInflows`, `pauseSpends`, `unpauseSpends` | Pause spends for more than 3 days, or again within 7 days of the last pause ending. Pause `reclaimDeposit` or `rejectDeposits` |
+| Reserve admin | One address per Reserve, named in `registerReserve` | Every permission below. `grantPermission`, `revokePermission`, `transferAdmin` | Move a Reserve's assets |
+| `ASSETS` | Any accounts the admin grants | `setAssetMinDeposit` | Move assets |
+| `USERS` | Any accounts the admin grants, typically the registrar and its signers | `addUser`, `removeUser`, sign registrations, `revoke` every signature for a leaf | Remove the last member. Use a signature made before it lost `USERS` |
+| `METADATA` | Any accounts the admin grants | `updateAuditorKey` | Read members' spends: the auditor key has no cryptographic role |
+| `SCREENING` | Any accounts the admin grants | `setScreener` | Decide deposits itself, unless it names itself screener |
+| Deposit screener | One address per Reserve, set by `SCREENING` | `approveDeposits`, `rejectDeposits` for that Reserve's pending deposits | Move funds. Stop a reclaim |
+| Depositor, `refundTo` | Whoever deposited, and the address they named | The depositor reclaims a pending deposit, to itself, and can change `refundTo` while it is pending. Either reclaims a rejected deposit, paid to `refundTo` | Reclaim an approved deposit. `refundTo` cannot reclaim a pending one |
+| Note owner | A wallet or contract, for `auth_done = 0` notes | Submit the spend of its notes | Hand submission to anyone else: the Chamber requires the owner as caller |
+| Relayer | Anyone | Submit an `auth_done = 1` spend | Change any public input of it |
+
+A key holder, whoever holds a Reserve's members' key exchanges, is not an on-chain role. It reads member spends off-chain: see [Circuits](/circuits/).
+
+## Verifier timelock
+
+The verifier decides which spends are valid, so replacing it is the most powerful action in the protocol. It is timelocked:
+
+1. The owner calls `proposeVerifier(verifier_)`. The address must have code. The Chamber stores it with its code hash and an eta 7 days out, and emits `VerifierUpdateProposed(verifier, codehash, eta)`. A new proposal replaces a pending one and restarts the delay.
+2. Users and monitors compare the published code hash with a build of the expected verifier.
+3. After the eta, the owner calls `executeVerifierUpdate()`. It reverts with `verifier timelock` before the eta and with `verifier code changed` if the code at the address no longer matches the hash. It emits `VerifierUpdated(verifier, codehash)`.
+
+`cancelVerifierUpdate()` drops a pending proposal and emits `VerifierUpdateCancelled`. The 7-day delay is longer than the 3-day maximum spend pause, so a guardian pause alone cannot cover the whole window of a queued change. A user who can spend has time to exit first. A member removed from a Reserve with members cannot spend there, so that user has no exit until exit spends, which are **Planned**.
+
+The code-hash check pins the verifier's own code, not its behaviour. A proxy, or a verifier that delegatecalls or reads mutable state, could change behaviour under the same code hash. Core's operations notes say to propose only a verifier with no storage and no calls except to precompiles, as the generated `ChamberVerifier` is.
+
+## Ownership timelock
+
+The Chamber uses OpenZeppelin's `Ownable2Step` with a delay:
+
+- `transferOwnership(newOwner)` sets the pending owner and an eta 7 days out, and emits `OwnershipTransferQueued(newOwner, eta)`. Passing zero cancels, with eta 0.
+- The pending owner calls `acceptOwnership()` after the eta, or it reverts with `ownership timelock`.
+- `renounceOwnership()` always reverts: with `renounce disabled` for the owner, and with `OwnableUnauthorizedAccount` for anyone else.
+
+## Guardian pauses
+
+| Pause | Stops | Length | Ended by |
+| --- | --- | --- | --- |
+| `pauseInflows` | `deposit`, `approveDeposits` | Until unpaused | `unpauseInflows`, by the guardian or the owner |
+| `pauseSpends` | `handleZkp`: private payments and withdrawals | 3 days | Expiry, or `unpauseSpends` by the guardian or the owner |
+
+- **Cooldown.** A new spend pause can start only 7 days after the previous one ended. Ending a pause early starts the cooldown from that moment. Rotating the guardian does not reset it.
+- **Never paused.** `reclaimDeposit` and `rejectDeposits`, so a pause never traps a queued deposit. Neither pause touches governance or registration either: `registerReserve`, every Reserve function and the registrar keep working.
+
+## Security notes
+
+These are the trust assumptions, stated plainly.
+
+| Holder | Worst case if acting against users |
+| --- | --- |
+| Chamber owner | Proposes a verifier that accepts any proof. After 7 days it could authorise the withdrawal of every asset in every Reserve, because no on-chain ledger checks withdrawals against notes. The defence is the published code hash and the 7-day window to exit. The owner can also make itself guardian with `setGuardian` at once |
+| Guardian | Pauses deposits with no time limit. The owner can call `unpauseInflows` itself, but a hostile guardian can pause again at once, so the owner replaces the guardian with `setGuardian` before unpausing. Replacing the guardian alone does not end the pause. Halts all spends, withdrawals included, for up to 3 days, then must wait 7 days after that pause ends before the next |
+| Whoever ran the trusted setup | Could forge a proof for any public inputs, including a withdrawal, if they kept the setup's secret randomness. The keys come from a single-party setup. See [Circuits](/circuits/) |
+| Reserve admin or `USERS` | Decides who can spend at a Reserve with members. Any single `USERS` holder, a hot signing key included, can remove a member, which leaves that member's notes there unspendable until they are registered again. Never registering a holder does the same. An exit spend for that case is **Planned**, and core's operations notes say not to deploy to production, or not to let any Reserve remove users, until it lands |
+| `METADATA` | Each update replaces the shared zkState root. Proofs against the old root stay valid for 10 minutes |
+| `ASSETS` | Listing an asset that charges outgoing fees, rebases downward, blocklists the Reserve or is upgradeable can leave notes that claim more than the Reserve holds |
+| Screener | Keeps deposits out of the tree. Cannot take them: a pending deposit returns to its depositor, and a rejected one to the `refundTo` the depositor chose |
+
+Further limits that hold for every user:
+
+- **No solvency ledger.** The Chamber cannot check a withdrawal against private notes. Each Reserve's own balance caps what it pays, and the circuit's conservation rule keeps payouts within the notes.
+- **One zkState root for every Reserve.** A busy Reserve changes it often. Each superseded root stays valid for 10 minutes. When any Reserve gets its first member, every superseded root is retired at once, across all Reserves.
+- **Assets sent to a Reserve directly are lost.**
+- **Identifiers are first come, first served** across every Reserve.
+- **Compliance is experimental.** Screening is off-chain and on entry only.
+
+These pages claim no external audit.

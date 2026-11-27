@@ -1,0 +1,96 @@
+---
+title: Verifier and deployment
+description: "ChamberVerifier, the generated Groth16 verifier and how it is replaced, and what Deploy.s.sol deploys, checks and configures, with the steps that follow a deployment."
+sidebar:
+  order: 8
+---
+
+`ChamberVerifier` is generated from the circuit's proving key and never edited by hand. `script/Deploy.s.sol` deploys it with the Chamber and the registrar, and the rest of a deployment is configuration by the owner and each Reserve's admin.
+
+## ChamberVerifier
+
+The file header reads: generated, do not edit by hand, exported from the gnark proving key for `PrimaryTransactionCircuit`. It is gnark's Groth16 verifier template for BN254, with the verifying key as constants: the alpha, beta, gamma and delta points, a constant point and one point per public input, `PUB_0` to `PUB_13`.
+
+```solidity
+function verifyProof(bytes calldata proof, uint256[14] calldata input) public view;
+function verifyCompressedProof(uint256[4] calldata compressedProof, uint256[14] calldata input) public view;
+function compressProof(bytes calldata proof) public view returns (uint256[4] memory compressed);
+```
+
+| Function | Takes | Reverts |
+| --- | --- | --- |
+| `verifyProof` | An uncompressed 256-byte proof | `invalid proof length`, `PublicInputNotInField()`, `ProofInvalid()` |
+| `verifyCompressedProof` | A compressed proof of four words | `PublicInputNotInField()`, `ProofInvalid()` |
+| `compressProof` | An uncompressed 256-byte proof | `invalid proof length`, or `ProofInvalid()` for a point off its curve |
+
+`Chamber.handleZkp` uses `verifyProof` only, with its eight proof words packed into 256 bytes. The verifier uses the EVM's precompiles for modular exponentiation, point addition, scalar multiplication and the pairing check. It rejects any public input at or above the field order: the scalar-multiplication precompile reduces its scalar, so without the check `x` and `x + r` would verify alike.
+
+The keys behind the verifier come from a single-party setup. [Circuits](/circuits/) states what that means.
+
+### Keeping it in sync
+
+- Core's `TestVerifierPublicInputCountMatchesCircuit` requires the circuit, the verifier and `Chamber.PublicParams` to agree on 14 public inputs.
+- The Foundry suite replays `testdata/e2e_fixture.json`, a real proof made offline from the keys, against the real verifier. Count checks alone cannot show that the verifier's constants match the proving key. A real proof does.
+
+### Replacing it
+
+1. From `core/contracts`, run `../../core-deploy/scripts/build.sh`. It writes `src/ChamberVerifier.sol`, and a new fixture when the keys changed. Review the diff and commit it with the new keys.
+2. Deploy the new verifier.
+3. The Chamber owner calls `proposeVerifier(newVerifier)` and publishes the code hash from `VerifierUpdateProposed`.
+4. After 7 days the owner calls `executeVerifierUpdate()`, which checks the code hash again.
+
+Regenerating the file changes nothing on-chain. Only the timelocked call does. See [Roles and security](/contracts/roles-and-security/#verifier-timelock).
+
+## Deploy.s.sol
+
+:::caution[Not before the exit spend]
+Core's operations notes say not to deploy these contracts to production, or not to let any Reserve remove users, until the exit spend is in the circuit and the verifier. Until then a removal by any single `USERS` holder freezes the removed user's notes at that Reserve. The exit spend is **Planned**.
+:::
+
+The script reads its settings from the environment:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PRIVATE_KEY` | Required | The deployer's key |
+| `CHAMBER_OWNER` | Zero | The owner, a Safe. Required outside the development chains |
+| `GUARDIAN` | Zero | The guardian, passed to the Chamber constructor. Required outside the development chains |
+| `DEV_FIXTURES` | `false` | Deploy a development Reserve, a mock asset and one registered user |
+| `USER_KEY_EXCHANGE` | 0 | The development user's key exchange. Required with `DEV_FIXTURES` |
+
+`isTestChain(chainId)` is true for chain IDs 31337 and 11155111, the development chains. Every other chain is treated as production, and there `validate`:
+
+- refuses `DEV_FIXTURES` and the fixture key exchange `0x6b6579`;
+- requires `CHAMBER_OWNER` to be set, to differ from the deployer, and to be a multisig: a contract whose `getThreshold()` returns at least 2;
+- requires `GUARDIAN` to be set.
+
+On the two development chains none of this is checked, except that `DEV_FIXTURES` needs a non-zero `USER_KEY_EXCHANGE`. A development network has to be added to `isTestChain` before fixtures can be deployed there.
+
+The script then broadcasts, in order:
+
+1. `new ChamberVerifier()`.
+2. `new Chamber(initialOwner, verifier, GUARDIAN)`. `initialOwner` is `CHAMBER_OWNER`, unless `DEV_FIXTURES` is set or no owner is named, in which case it is the deployer.
+3. `new ManagerSigRegistrar()`.
+4. With `DEV_FIXTURES`: a mock ERC-20, `registerReserve(deployer, 789, 987)`, `setAssetMinDeposit(asset, 1)`, a `USERS` grant to the registrar, and a registration of `H2(deployer, USER_KEY_EXCHANGE)` signed by the deployer with a deadline one hour out.
+5. `chamber.transferOwnership(CHAMBER_OWNER)`, only if `CHAMBER_OWNER` is named and differs from `initialOwner`. That happens with `DEV_FIXTURES` and an owner other than the deployer. The owner calls `acceptOwnership()` after the 7-day delay.
+
+Outside the development chains the Chamber is therefore built owned by its Safe, with its guardian in place, and the deployer key never holds a power over it. It writes the address book to `deployments/<chainId>.json`, with the Chamber, verifier, registrar, development Reserve and mock asset addresses. These pages list no deployed addresses.
+
+`Poseidon2` in `lib/Poseidon.sol` exposes `public` functions, so it is deployed as its own library contract and linked into the contracts that hash.
+
+:::caution[Development fixtures are not for real funds]
+The development Reserve has a fixed auditor key (789, 987), a mock asset, no screener, and the deployer as admin. Its registered user's key exchange is whatever `USER_KEY_EXCHANGE` holds. The fixture value `0x6b6579` is public, so anyone can derive that user's messaging keys and decrypt their spends.
+:::
+
+## After deployment
+
+1. **Ownership.** If the script queued a transfer, the owner calls `acceptOwnership()` after 7 days. Otherwise the Chamber already has its final owner.
+2. **Guardian.** If none was named at construction, the owner calls `setGuardian`.
+3. **Reserves.** The owner calls `registerReserve(admin, keyHash, keyInputPoint)` for each Reserve, naming a Safe as admin.
+4. **Screener first.** The Reserve admin, or a `SCREENING` holder, calls `setScreener` before any asset is listed.
+5. **Registration.** The admin grants `USERS` to the registrar and to each signer.
+6. **Assets.** An `ASSETS` holder lists each asset with `setAssetMinDeposit`. Never list an asset that charges outgoing fees, rebases, blocklists or can be upgraded.
+7. **Monitoring.** Watch the events listed on [Events and errors](/contracts/events-and-errors/#what-to-monitor).
+
+## Toolchain
+
+`foundry.toml` pins solc 0.8.35, the Paris EVM target and 200 optimizer runs. The deployed sources pin `pragma solidity 0.8.35`. The Paris target has no `PUSH0`.

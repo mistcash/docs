@@ -1,0 +1,125 @@
+---
+title: Reserve
+description: "Reserve.sol in detail: the admin and its two-step handover, the four permission roles, the users tree with addUser and removeUser, the auditor key, the screener, the asset list and the Chamber-only deposit and withdraw."
+sidebar:
+  order: 4
+---
+
+A Reserve holds the assets of the notes in its custody, under one rule set. It moves assets only when its Chamber asks, and it keeps the registered-users tree that decides who can spend there.
+
+:::caution[Assets sent to a Reserve directly are lost]
+A Reserve takes assets only through `Chamber.deposit`. Assets sent to a Reserve address by a plain transfer are unrecoverable: no function moves them out.
+:::
+
+## Deposit and withdraw
+
+```solidity
+function deposit(address from, uint256 amount, address asset)
+  external onlyChamber returns (uint256 received);
+
+function withdraw(address to, uint256 amount, address asset)
+  external onlyChamber;
+```
+
+Both revert with `Reserve: only chamber` for any caller other than the immutable `chamber`. `deposit` pulls `amount` from `from` with `safeTransferFrom` and returns the balance the Reserve actually gained, which must be above 0. `withdraw` sends `amount` with `safeTransfer`. The Chamber calls `withdraw` for a spend's withdrawal and for `reclaimDeposit`.
+
+A Reserve keeps no note accounting. Its own balance of each asset caps what it can pay out, and the circuit's conservation rule is what keeps payouts within the notes it custodies.
+
+## Admin
+
+```solidity
+function transferAdmin(address newAdmin) external onlyAdmin;
+function acceptAdmin() external;
+```
+
+The admin is named by the Chamber owner in `registerReserve` and cannot be zero. It holds every permission, grants and revokes them, and is the only account that moves the admin role. A live Reserve's admin should be a Safe.
+
+- **Two steps.** `transferAdmin(newAdmin)` nominates, and emits `AdminTransferStarted`. The nominee calls `acceptAdmin()`, and the Reserve emits `AdminTransferred`. Nominating zero cancels. There is no delay. The previous admin loses its implicit permissions, and its permission epoch moves for every role it holds no explicit grant for.
+- **Grants survive a handover.** Explicit grants are not cleared. The new admin reviews the Reserve's `PermissionGranted` and `PermissionRevoked` events and revokes stale grants, including any held by the previous admin's address. Registrars and bots keep working through a handover.
+
+## Permissions
+
+```solidity
+function grantPermission(bytes32 role, address account) external onlyAdmin;
+function revokePermission(bytes32 role, address account) external onlyAdmin;
+function hasPermission(bytes32 role, address account) public view returns (bool);
+```
+
+Each role is held by any number of accounts. `hasPermission` is true for the admin on every role, and for any account with an explicit grant. The admin's implicit permissions cannot be revoked. An unknown role reverts with `Reserve: unknown permission`.
+
+- **No-ops are silent.** Granting a role the account already holds, or revoking one it holds no explicit grant for, changes nothing and emits nothing. A grant to the zero address reverts with `Reserve: zero account`.
+- **Permission epoch.** `permissionEpoch(role, account)` moves when the account's explicit grant of the role is revoked, and, for each role it holds no explicit grant for, when it hands the admin role on. Either way, the account's signatures made before stop counting. The registrar binds a signer's `USERS` epoch into every signature, so re-granting an account never revives the signatures it made before it lost the role.
+
+| Role | `bytes32` value | Functions |
+| --- | --- | --- |
+| `ASSETS` | `keccak256("ASSETS")` | `setAssetMinDeposit` |
+| `USERS` | `keccak256("USERS")` | `addUser`, `removeUser`. The registrar checks it on every signer |
+| `METADATA` | `keccak256("METADATA")` | `updateAuditorKey` |
+| `SCREENING` | `keccak256("SCREENING")` | `setScreener` |
+
+The role hashes, computed with `cast keccak`:
+
+```text
+ASSETS     0xbedf7b8facec7798b9b01bb658494261f59b3146617a1cf263926c9626250046
+USERS      0x80e5f4d2db32e62ee85b4d06c4355ea22b847c9659454b4b59d5724ae281b12c
+METADATA   0x6afae84a1cc73825b77b2d8f14dc55a052ec6456df5cb0940e5de49ee56c0bd3
+SCREENING  0x87738fabb7e519ff1ec6a8c1dd5301bff177effd9d2630cd988fe8a333139530
+```
+
+Every permissioned action is taken on the Reserve, which pushes the result to the Chamber. The Reserve makes no call whose target or data a role holder chooses: it holds custody and depositors' allowances, and such a call could move both.
+
+## Users tree
+
+```solidity
+function addUser(uint256 leaf) external onlyPermission(USERS) returns (uint256 index);
+function removeUser(uint256 index) external onlyPermission(USERS);
+```
+
+A member's leaf is `H2(owner, userKeyExchange)`, computed off-chain. Only the hash goes on-chain. The tree holds 4^10 = 1,048,576 leaf slots. Removals do not free slots, so every registration, including a re-registration, uses one, and `addUser` reverts with `merkle tree capacity exceeded` once all are used.
+
+- **`addUser`** requires a non-zero leaf below the field order that is not currently registered. It appends the leaf, increments `leafNonce(leaf)`, emits `UserRegistered(leaf, index, root)` and pushes the new root with `Chamber.setReserveStateRoot`.
+- **`removeUser`** takes the index from `UserRegistered`. It zeroes the leaf, clears `isRegisteredUser(leaf)`, increments `leafNonce(leaf)`, emits `UserRemoved(index, leaf, root)` and pushes the new root. It reverts with `Reserve: no user at index` for an index past the last leaf or an already-zero leaf, and with `Reserve: last user` if the users root would become zero. A zero users root would switch messaging off, and the Chamber also refuses one. To remove a Reserve's only user, add another leaf first.
+- **Re-registration.** A removed leaf can be added again, at a new index. `leafNonce(leaf)` moves on every registration and every removal, and the registrar binds its signatures to it, so no signature collected before a removal can put the user back. Re-registering needs a new signature.
+- **Lag.** A removal takes full effect within 10 minutes, when the last zkState root that holds the leaf leaves the Chamber's grace window.
+
+:::caution[A removal freezes the user's notes]
+A user removed from a Reserve with members cannot spend or withdraw there until a `USERS` holder registers them again, and any single `USERS` holder can make the removal. An exit spend that lets any owner withdraw in public is **Planned**. Core's operations notes say not to deploy these contracts to production, or not to let any Reserve remove users, until that exit spend is in the circuit and the verifier.
+:::
+
+| View | Returns |
+| --- | --- |
+| `registeredUsersRoot()` | The users root, zero while empty |
+| `registeredUsersCount()` | Leaf slots used, removed users included. A removed slot is never reused |
+| `registeredUserProof(index)` | The 30-element membership proof for the leaf at `index` |
+| `isRegisteredUser(leaf)` | Whether the leaf is currently in the tree |
+| `leafNonce(leaf)` | A counter that moves on every registration and removal of the leaf |
+| `permissionEpoch(role, account)` | A counter that moves when the account's explicit grant is revoked, or when it hands the admin role on without one |
+
+## Auditor key
+
+```solidity
+function updateAuditorKey(uint256 keyHash_, uint256 keyInputPoint_)
+  external onlyPermission(METADATA);
+function auditorKey() external view returns (uint256, uint256);
+```
+
+`keyHash` and `keyInputPoint` are two opaque field elements of Reserve metadata, for example a hash of the Reserve's policy or of its key-exchange public key. They have no cryptographic role and no on-chain curve check. Both must be below the field order (`Reserve: auditor key not in field`). `updateAuditorKey` stores them, emits `AuditorKeyUpdated(keyHash, keyInputPoint, reserveConfig)` and pushes `reserveConfig = H2(keyHash, keyInputPoint)` with `Chamber.setReserveConfig`, which replaces the zkState root.
+
+## Screener and asset list
+
+```solidity
+function setScreener(address screener) external onlyPermission(SCREENING);
+function setAssetMinDeposit(address asset, uint256 minDeposit)
+  external onlyPermission(ASSETS);
+```
+
+- **`setScreener`** sets the Reserve's deposit screener in the Chamber, or clears it with zero. The screener is read when each deposit is decided, so a new screener decides every deposit still waiting.
+- **`setAssetMinDeposit`** lists an asset with a minimum deposit below 2^120, or delists it with zero. Nothing is depositable until an asset is listed. Delisting stops new deposits and leaves existing notes spendable.
+
+The minimum applies to the amount the Reserve received. A maximum transaction amount per asset is **Planned**.
+
+:::caution[Assets that must not be listed]
+Withdrawals and reclaims send a fixed amount. An asset that charges a fee on outgoing transfers, rebases downward, blocklists the Reserve or can be upgraded into either, leaves notes that claim more than the Reserve can pay. Never list such an asset.
+:::
+
+Set the screener before listing the first asset. Deposits made while an asset is listed and no screener is set enter unscreened.
