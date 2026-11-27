@@ -1,0 +1,105 @@
+---
+title: Notes and keys
+description: "Identities, the note model, key indices and what the host must persist."
+sidebar:
+  order: 4
+---
+
+The client holds a wallet's notes and key exchanges in memory and nothing more. A host that keeps either across sessions persists them itself.
+
+## Identities
+
+An identity is a name that decides who owns a note.
+
+| Identity | Owner | Spend authorised by |
+| --- | --- | --- |
+| `alice` | The address `addressOf("alice")` returns, as a decimal field string | The wallet, as the caller of `handleZkp` |
+| `alice (MIST)` | A MIST Address, `H2(secret, "owner")`, where `secret` is `secretOf("alice (MIST)")` | The proof, which shows knowledge of the secret |
+
+`isMist(id)` tells the two apart, `account(id)` strips the `(MIST)` suffix, and `ownerOf` computes the owner. [Private transfers and withdrawals](/sdk/transfers/) covers what each kind means for who submits.
+
+`secretOf` is a synchronous `(id) => string` and returns a decimal string below the field order. The SDK's helper returns `keccak256(privateKey) >> 8`, which is for development only. A browser wallet never exposes its private key, so an application derives the secret from a wallet signature. The signature call is asynchronous, so the host obtains it first and the callback returns the stored value. The same identity must always yield the same secret, or its notes become unspendable.
+
+## The note model
+
+```ts
+interface Note {
+  reserve: Hex;
+  id: string;
+  blinding: string;
+  amount: bigint;
+  hash?: string;
+  txIndex?: number;
+  spent?: boolean;
+  nullifier?: string;
+  kind?: string;
+  screening?: "pending" | "rejected" | "reclaimed";
+  depositId?: string;
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `reserve`, `id` | The Reserve holding the assets and the owning identity |
+| `blinding`, `amount` | The two secrets a note hash hides. Nothing on the chain gives either back, so a lost value is a lost note |
+| `hash` | The note hash. Set from the deposit result or the proof output |
+| `txIndex` | The note's global index in the Chamber's transaction array. It fixes the tree the note sits in, and the client looks it up from `hash` when unset |
+| `spent`, `nullifier` | Set after a spend of the note is submitted |
+| `kind` | `deposit`, `received` or `change`, set by the client |
+| `screening`, `depositId` | Set while a deposit waits at a screened Reserve, or after the screener rejected it or it was reclaimed. [Deposits](/sdk/deposits/) covers them |
+
+A note is spendable when it is not `spent`, has no `screening` and belongs to the identity at the Reserve. `client.unspent(reserve, id)` lists those notes and `client.total()` sums the unspent ones.
+
+Reserve addresses compare as strings, in `notes` and in the `ukx` keys. The host passes each Reserve in one casing throughout.
+
+A spend records the notes it creates in `client.notes`: the change note and the recipient's note, each under its own identity. The SDK has no way to find a note created for someone else, because the protocol defines no note discovery. A recipient in another client needs the sender to pass the note's `blinding` and `amount` over a channel of its own, and adds a `Note` to its `client.notes`.
+
+## Key exchanges
+
+At a Reserve with members, a member's `join` produces a key exchange, `ukx`. The client keeps it as `client.ukx["<reserve>:<mistAddr>"]`. `isMember(reserve, id)` is true when that entry exists. Without it the client cannot prove membership, and the member joins again. Notes are unaffected, because a note's owner is the MIST Address and not the key exchange.
+
+A key holder's client reads the same map. `openPayload` tries each `ukx` entry of a Reserve, so the key holder fills the map with the members' key exchanges.
+
+## Key indices
+
+Each member spend carries a key index from 0 to 255, and the Chamber files the spend under a private transaction key derived from the key exchange and that index. The Chamber rejects a key it has seen, so an index is used once per key exchange.
+
+- `spend` draws an index at random from those not yet used for the key exchange. The indices live in `client.usedKeyIndices`.
+- A key exchange allows 256 member spends. After that the draw throws `All 256 key indices used for this ukx`, and the member joins again to get a fresh key exchange.
+- A spend by a non-member at a Reserve without members uses no recorded index.
+- Used indices persist through the `store`, under `mist:keyIndices`. The client merges into the stored map and never overwrites it, so two clients sharing one store do not erase each other's indices.
+
+Call `restoreKeyIndices()` once at startup when a `store` is passed. `spend` also re-reads the store before it draws. Without the startup call, a reload begins with an empty set and can draw an index already spent, and the Chamber reverts the spend.
+
+```ts
+import { MistClient } from "@mistcash/sdk";
+
+declare const client: MistClient;
+
+await client.restoreKeyIndices();
+```
+
+## What the host persists
+
+| State | Lives in | Persisted by |
+| --- | --- | --- |
+| Notes | `client.notes`, in memory | The host |
+| Key exchanges | `client.ukx`, in memory | The host |
+| Used key indices | `client.usedKeyIndices`, mirrored to `store` | The client, through the `store` |
+| The MIST secret | `secretOf` | The host's wallet derivation |
+
+`notes` holds `bigint` amounts, which `JSON.stringify` rejects. A host converts them on the way out and back.
+
+```ts
+import type { MistClient, Note } from "@mistcash/sdk";
+
+declare const client: MistClient;
+
+const saved = JSON.stringify({ notes: client.notes, ukx: client.ukx }, (_key, value) =>
+  typeof value === "bigint" ? value.toString() : value,
+);
+
+const restored = JSON.parse(saved) as { notes: Array<Omit<Note, "amount"> & { amount: string }>; ukx: Record<string, string> };
+client.notes = restored.notes.map((note) => ({ ...note, amount: BigInt(note.amount) }));
+Object.assign(client.ukx, restored.ukx);
+```
