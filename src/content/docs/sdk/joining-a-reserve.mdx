@@ -98,6 +98,6 @@ Three of those values move on their own, which is why the digest is read just be
 
 Two more reverts come from the Reserve. `Reserve: missing permission` means the registrar does not hold `USERS`. `Reserve: user already registered` means the leaf is already in the tree.
 
-When the transaction reverts and the adapter throws, `join` records no membership. A contract signer's ERC-1271 check runs after the ECDSA check. `USERS` should go only to contracts whose ERC-1271 cannot approve arbitrary digests.
+When the transaction reverts, `join` records no membership: a `reverted` receipt throws `MistClient: registerUser reverted (<hash>)`, and so does an adapter that throws itself. A contract signer's ERC-1271 check runs after the ECDSA check. `USERS` should go only to contracts whose ERC-1271 cannot approve arbitrary digests.
 
 Leaving is the Reserve's act. `removeUser` zeroes a member's leaf. See [Reserve administration](/sdk/reserve-administration/).

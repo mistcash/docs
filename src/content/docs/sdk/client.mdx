@@ -63,12 +63,12 @@ interface ChainAdapter {
 | Member | Must return |
 | --- | --- |
 | `readContract` | The decoded result of a view call. Every function name the client reads is in `CORE_ABI` |
-| `sendTransaction` | `{ hash?, result?, receipt }` once the transaction is confirmed. `receipt` carries `transactionHash` and `logs`, and optionally `gasUsed` and `status` |
+| `sendTransaction` | `{ hash?, result?, receipt }` once the transaction is confirmed. `receipt` carries `transactionHash` and `logs`, and optionally `gasUsed` and `status`, which is `success` or `reverted` |
 | `getEvents` | Decoded events with `args`. Optional, but `queuedDeposits`, `registeredUserLeaves` and every `spend` at a Reserve with members need it |
 
 ### sendTransaction
 
-The host owns signing, simulation, gas and waiting. The client calls `sendTransaction` for every write and never reads `receipt.status`, so an adapter throws when a transaction reverts. Otherwise the client records a membership or a spend that never happened.
+The host owns signing, simulation, gas and waiting. The client calls `sendTransaction` for every write. A receipt with `status` of `reverted` fails the call with `MistClient: <function> reverted (<hash>)`, before `onTx` fires and before the client changes any local state. An adapter that leaves `status` out must throw on a revert itself. Otherwise the client records a membership or a spend that never happened.
 
 `receipt.logs` is required.
 
@@ -92,7 +92,7 @@ The adapter also decides who submits. [Private transfers and withdrawals](/sdk/t
 | --- | --- | --- |
 | `onProgress(stage)` | At each stage: `Approving`, `Depositing`, `Exchanging keys`, `Registering`, `Proving in your browser`, `Relayer submitting` or `Submitting` | Progress display. The strings are for people, not for matching |
 | `onBeforeSend({ to, data, functionName })` | Before each `sendTransaction` | Return `false` to veto. The call throws `MistClient: send of <functionName> vetoed by onBeforeSend` |
-| `onTx({ functionName, receipt })` | After each confirmed write | Logging and fan-out |
+| `onTx({ functionName, receipt })` | After each confirmed write, never after a reverted one | Logging and fan-out |
 | `onProof({ kind: "spend", secs })` | After proving | Timing |
 
 ## Storage adapter
