@@ -23,11 +23,12 @@ A spend with no commitments emits only its two `NoteAppended` events. Nullifiers
 
 | Event | Emitted when |
 | --- | --- |
-| `DepositQueued(uint256 indexed depositId, uint256 noteHash, address indexed reserve, address indexed depositor, address asset, uint256 amount)` | A deposit at a screened Reserve is queued. `amount` is what the Reserve received |
+| `DepositQueued(uint256 indexed depositId, uint256 noteHash, address indexed reserve, address indexed depositor, address asset, uint256 amount, address refundTo)` | A deposit at a screened Reserve is queued. `amount` is what the Reserve received, and `refundTo` who a rejection refunds |
+| `DepositRefundToSet(uint256 indexed depositId, address refundTo)` | The depositor changes a pending deposit's `refundTo` |
 | `DepositApproved(uint256 indexed depositId, uint256 indexed noteHash, bytes32 evidence)` | The screener admits a queued deposit. A `NoteAppended` follows |
-| `DepositRejected(uint256 indexed depositId, bytes32 evidence)` | The screener refuses a queued deposit |
+| `DepositRejected(uint256 indexed depositId, bytes32 evidence)` | The screener refuses a queued deposit. A reclaim now pays its `refundTo` |
 | `DepositDuplicateRejected(uint256 indexed depositId, uint256 indexed noteHash)` | Approval finds the note already in a tree and rejects the deposit instead |
-| `DepositReclaimed(uint256 indexed depositId, address indexed depositor, address to)` | A pending or rejected deposit is paid back to `to` |
+| `DepositReclaimed(uint256 indexed depositId, address indexed depositor, address to)` | A pending deposit is paid back to the depositor, or a rejected one to `refundTo`, as `to` |
 
 An unscreened deposit emits only `NoteAppended`.
 
@@ -52,7 +53,7 @@ An unscreened deposit emits only `NoteAppended`.
 | `OwnershipTransferQueued(address indexed newOwner, uint256 eta)` | The owner queues a transfer. Zero `newOwner` and `eta` mean it was cancelled |
 | `OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner)` | The same moment, from `Ownable2Step` |
 | `OwnershipTransferred(address indexed previousOwner, address indexed newOwner)` | A transfer completes, from `Ownable` |
-| `GuardianSet(address indexed guardian)` | The owner sets the guardian |
+| `GuardianSet(address indexed guardian)` | The constructor names a non-zero guardian, or the owner sets one |
 | `InflowsPaused(address indexed by)`, `InflowsUnpaused(address indexed by)` | Inflows are paused or resumed |
 | `SpendsPaused(uint256 until)`, `SpendsUnpaused(address indexed by)` | Spends are paused until `until`, or resumed early |
 
@@ -63,8 +64,8 @@ An unscreened deposit emits only `NoteAppended`.
 | `UserRegistered(uint256 indexed leaf, uint256 index, uint256 root)` | `addUser` appends a member. `index` is what `removeUser` takes |
 | `UserRemoved(uint256 indexed index, uint256 indexed leaf, uint256 root)` | `removeUser` zeroes a member's leaf |
 | `AuditorKeyUpdated(uint256 keyHash, uint256 keyInputPoint, uint256 reserveConfig)` | `updateAuditorKey` rotates the metadata |
-| `PermissionGranted(bytes32 indexed role, address indexed account)` | The admin grants a role |
-| `PermissionRevoked(bytes32 indexed role, address indexed account)` | The admin revokes a role |
+| `PermissionGranted(bytes32 indexed role, address indexed account)` | The admin grants a role the account did not hold. Not emitted for a repeat grant |
+| `PermissionRevoked(bytes32 indexed role, address indexed account)` | The admin revokes an explicit grant, which moves the account's permission epoch. Not emitted without a grant |
 | `AdminTransferStarted(address indexed admin, address indexed pendingAdmin)` | The admin nominates a successor, or cancels with zero |
 | `AdminTransferred(address indexed previousAdmin, address indexed newAdmin)` | The nominee accepts |
 
@@ -72,7 +73,7 @@ An unscreened deposit emits only `NoteAppended`.
 
 | Event | Emitted when |
 | --- | --- |
-| `SignatureRevoked(address indexed reserve, uint256 indexed leaf, uint256 deadline, bytes32 digest)` | A `USERS` holder revokes an authorisation |
+| `SignaturesRevoked(address indexed reserve, uint256 indexed leaf, uint256 revocations)` | A `USERS` holder revokes every outstanding signature for a leaf. `revocations` is the new count |
 
 A successful `registerUser` emits nothing of its own. The Reserve's `UserRegistered` records it.
 
@@ -93,10 +94,12 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `amount exceeds 2^120` | The received amount, or a minimum deposit, is too large |
 | `Chamber: deposit below minimum` | The received amount is below the Reserve's minimum |
 | `transaction already exists` | The deposit's note hash is already in a tree |
-| `Chamber: zero refundTo` | The `refundTo` overload with a zero address |
+| `Chamber: zero refundTo` | The `refundTo` overload, or `setDepositRefundTo`, with a zero address |
+| `Chamber: not pending` | `setDepositRefundTo` on a deposit the screener has decided, or an unknown one |
+| `Chamber: only depositor` | `setDepositRefundTo`, or the reclaim of a pending deposit, by anyone but the depositor |
 | `Chamber: only reserve screener` | A screening batch holds a pending deposit the caller does not screen |
 | `Chamber: no queued deposit` | Reclaim of an approved, reclaimed or unknown deposit |
-| `Chamber: only depositor or refundTo` | Reclaim by anyone else |
+| `Chamber: only depositor or refundTo` | Reclaim of a rejected deposit by anyone else |
 | `Chamber: spends paused` | `handleZkp` during a spend pause |
 | `address input out of range` | A withdrawal address input is at or above 2^160 |
 | `bad commitments preimage` | The published commitments are not six in-field elements folding to the public input, or are present when it is 0 |
@@ -107,6 +110,7 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `transaction is spent` | A nullifier is already spent |
 | `private tx key used` | The identifier was filed by an earlier spend |
 | `Chamber: not a registered reserve` | A Reserve setter called by any other address |
+| `Chamber: users root back to zero` | A users-root push that would return a non-zero users root to zero |
 | `invalid reserve admin` | `registerReserve` with a zero admin |
 | `invalid verifier` | A verifier address with no code, in the constructor or `proposeVerifier` |
 | `no pending verifier` | Execute or cancel with nothing proposed |
@@ -130,6 +134,7 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | `Reserve: only pending admin` | `acceptAdmin` from anyone but the nominee |
 | `Reserve: missing permission` | A permissioned function without the role |
 | `Reserve: unknown permission` | Grant or revoke of a role that is not one of the four |
+| `Reserve: zero account` | A grant to the zero address |
 | `Reserve: zero user leaf`, `Reserve: user leaf not in field` | `addUser` with a zero or out-of-field leaf |
 | `Reserve: user already registered` | `addUser` with a leaf that is in the tree |
 | `Reserve: no user at index` | `removeUser` past the last leaf or on a zeroed leaf |
@@ -143,9 +148,8 @@ Watch `VerifierUpdateProposed` and compare its code hash with the expected build
 | Revert | Cause |
 | --- | --- |
 | `Registrar: signature expired` | Called after the deadline |
-| `Registrar: signature revoked` | The digest was revoked |
 | `Registrar: missing users permission` | The signer, or the caller of `revoke`, lacks `USERS` on the Reserve |
-| `Registrar: invalid signature` | The signature does not verify for the signer |
+| `Registrar: invalid signature` | The signature does not verify for the signer over the current digest, including one voided by a revoke, a removal or the signer losing `USERS` |
 | `Registrar: bad signature length`, `Registrar: malleable signature`, `Registrar: bad signature v` | A malformed ECDSA signature from a signer with no code |
 
 ### Custom errors
