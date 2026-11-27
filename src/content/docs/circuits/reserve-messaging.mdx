@@ -35,19 +35,19 @@ Messaging is on when `usersRoot` is not zero. The rules are gated with `Select`,
 | `KeyIndex` fits in 8 bits | Checked | Checked |
 | `auditor_commitments` | Free | Equals `Fold2([privateTxKey, c0, c1, c2, c3, c4])` |
 
-A new Reserve's leaf is `H3(reserve, reserveConfig, 0)`, so it is spendable from its first block with no sync step. Messaging switches on when the first user registers, and from then on it applies to every note at that Reserve, notes created earlier included. It never switches off: a removal that would leave the users tree empty reverts.
+A new Reserve's leaf is `H3(reserve, reserveConfig, 0)`, so it is spendable from its first block with no sync step. Messaging switches on when the first user registers, and from then on it applies to every note at that Reserve, notes created earlier included. It never switches off: a removal that would leave the users tree empty reverts, and the Chamber refuses a users root that returns to zero.
 
 When a Reserve's users root first becomes non-zero, the Chamber stops accepting every superseded zkState root at once. Those roots hold a zero users root for that Reserve and would let a spend skip messaging.
 
-:::caution[Unregistered holders cannot spend at a Reserve with members]
-A deposit cannot check membership, because the owner commitment hides the owner. A holder who deposited before being registered, or before the Reserve had members, cannot spend or withdraw until they are registered. An exit spend that lets any owner withdraw in public is **Planned**.
+:::caution[Unregistered and removed holders cannot spend at a Reserve with members]
+A deposit cannot check membership, because the owner commitment hides the owner. A holder who deposited before being registered, or before the Reserve had members, cannot spend or withdraw until they are registered. A removed member is in the same position once the 10-minute grace window has passed. An exit spend that lets any owner withdraw in public is **Planned**.
 :::
 
 ## Membership
 
 A member's leaf is `H2(owner, userKeyExchange)`. `owner` is the owner of the notes the member spends: a MIST Address or a wallet address. `userKeyExchange` is a value the member and the key holder agree off-chain. It never appears on-chain, and it must be a full-entropy key-exchange output, or the public leaf could be brute-forced. The protocol does not fix the exchange.
 
-The Reserve's registrar adds the leaf, and only this hash goes on-chain. A removed member's leaf is set to zero. A member who was removed can still prove against a zkState root that holds their leaf until that root leaves the 10-minute grace window. [Contracts](/contracts/) covers registration and removal.
+The Reserve's registrar adds the leaf, and only this hash goes on-chain. A removed member's leaf is set to zero. A member who was removed can still prove against a zkState root that holds their leaf until that root leaves the 10-minute grace window. After that, their notes at the Reserve are frozen until they are registered again. [Contracts](/contracts/) covers registration and removal.
 
 ## Key and keystream
 
