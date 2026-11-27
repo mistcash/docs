@@ -1,0 +1,114 @@
+---
+title: Deposits
+description: "Depositing with MistClient: refundTo, the minimum deposit and asset list, screening, and who may reclaim a queued deposit."
+sidebar:
+  order: 5
+---
+
+`deposit` approves a Reserve and deposits into a private note. At a Reserve with a screener the note waits in a queue until the screener approves it, and the depositor can reclaim it until then.
+
+## Depositing
+
+```ts
+import { MistClient, rand, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const reserve: Hex;
+declare const amount: bigint;
+
+const note = await client.deposit({ reserve, id: "alice (MIST)", amount, blinding: rand() });
+```
+
+`deposit` takes `{ reserve, id, amount, blinding, refundTo? }` and returns the new `Note`, also pushed to `client.notes`. It runs in this order.
+
+1. It checks the deposit against the Chamber's own rules and refuses, with nothing sent, on a failure in the table below.
+2. It sends the approve to `book.token`, naming the Reserve as spender.
+3. It sends `Chamber.deposit`, the overload with `refundTo` when one is given.
+4. It reads the note from the receipt's `NoteAppended` or `DepositQueued` log, or from the adapter's `(noteHash, depositId)` result.
+
+| Refusal | Message |
+| --- | --- |
+| Amount is zero or less | `Enter a whole amount above zero.` |
+| Inflows are paused | `Deposits are paused.` |
+| The Reserve has not listed the asset | `This reserve does not accept this token.` |
+| Amount is below the Reserve's minimum | `The minimum deposit at this reserve is N.` |
+
+At a Reserve without a screener the note carries `hash` and `txIndex` and is spendable at once. At a screened Reserve it carries `screening: "pending"`, `depositId` and `hash`, and is not spendable until `refreshScreening` sees it approved.
+
+## The asset list and minimum deposit
+
+Each Reserve lists the assets it takes, each with a minimum deposit. Nothing is depositable until a holder of `ASSETS` lists the asset with `setAssetMinDeposit`. A minimum of 0 delists it. See [Reserve administration](/sdk/reserve-administration/). The client reads `reserveAssetMinDeposit` for `book.token` before it sends the approve, so a rejected deposit costs no approval.
+
+## refundTo
+
+`refundTo` names who a rejected deposit refunds, and who may then reclaim it. It defaults to the sender. A router depositing for a user names the user.
+
+```ts
+import { MistClient, rand, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const reserve: Hex;
+declare const amount: bigint;
+declare const userAddress: Hex;
+
+const note = await client.deposit({ reserve, id: "alice (MIST)", amount, blinding: rand(), refundTo: userAddress });
+await client.setDepositRefundTo(note.depositId!, userAddress);
+```
+
+`setDepositRefundTo(depositId, refundTo)` changes the address while the deposit is pending. Only the depositor can call it, and the zero address reverts. At a Reserve without a screener there is no queue, so there is nothing to refund.
+
+## Screening
+
+A holder of `SCREENING` names a screener for a Reserve. Deposits into that Reserve are then queued, and their notes enter a transaction tree only after the screener approves them. What the screener checks is the screener's own policy. The SDK carries the decision and the evidence commitment.
+
+| Method | Does |
+| --- | --- |
+| `isScreened(reserve)` | Whether the Reserve has a screener. False when the read reverts |
+| `pendingDeposit(id)` | One queue entry: `{ depositId, depositor, status, reserve, asset, amount, noteHash }`, with `status` of `none`, `pending` or `rejected`. `none` means settled or unknown |
+| `queuedDeposits(reserve?, fromBlock?)` | The pending deposits, oldest first, from `DepositQueued` events checked against the live queue. Needs `getEvents` |
+| `refreshScreening(notes?)` | Re-reads this client's screened notes |
+| `approveDeposits(ids, evidence)`, `rejectDeposits(ids, evidence)` | The screener's decision for a batch |
+| `reclaimDeposit(id)` | Takes a queued deposit back |
+
+`refreshScreening` moves each local note by what it finds. An approved note, which is in a tree, loses its `screening` flag and gets its `txIndex`. A note still queued keeps or takes `pending` or `rejected`. A pending note that left the queue without entering a tree is `reclaimed`. A rejected deposit that leaves the queue is `reclaimed` too, since rejection is final.
+
+```ts
+import { keccak256, toHex } from "viem";
+import { MistClient, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const reserve: Hex;
+declare const isAllowed: (depositor: Hex) => boolean; // the screener's own policy
+
+const queue = await client.queuedDeposits(reserve);
+const approved = queue.filter((deposit) => isAllowed(deposit.depositor));
+const rejected = queue.filter((deposit) => !isAllowed(deposit.depositor));
+
+// evidence is a bytes32 commitment to the off-chain screening record
+const evidence = keccak256(toHex(JSON.stringify({ approved, rejected }, (_key, value) => (typeof value === "bigint" ? value.toString() : value))));
+await client.approveDeposits(approved.map((deposit) => deposit.depositId), evidence);
+await client.rejectDeposits(rejected.map((deposit) => deposit.depositId), evidence);
+```
+
+- A batch skips ids that are no longer pending, for example one already reclaimed.
+- Approval rejects, instead of reverting, a deposit whose note is already in a tree (`DepositDuplicateRejected`). A mined `approveDeposits` therefore does not mean every id was approved. `refreshScreening` reads the outcome.
+- The screener is read when a deposit is decided. A new screener decides every deposit still queued.
+- Notes with `screening` set are never picked as spend inputs.
+
+## Reclaiming
+
+| Deposit status | Who may call `reclaimDeposit` | Who is paid |
+| --- | --- | --- |
+| Pending | The depositor only | The depositor |
+| Rejected | The depositor or `refundTo` | `refundTo`, which is the depositor when none was named |
+
+Reclaiming is never paused, so a screener or a pause cannot trap a deposit. After a reclaim the client marks the matching local note `reclaimed`.
+
+```ts
+import { MistClient } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const depositId: string;
+
+await client.reclaimDeposit(depositId);
+```
