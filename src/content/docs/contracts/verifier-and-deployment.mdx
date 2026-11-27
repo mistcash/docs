@@ -43,28 +43,37 @@ Regenerating the file changes nothing on-chain. Only the timelocked call does. S
 
 ## Deploy.s.sol
 
+:::caution[Not before the exit spend]
+Core's operations notes say not to deploy these contracts to production, or not to let any Reserve remove users, until the exit spend is in the circuit and the verifier. Until then a removal by any single `USERS` holder freezes the removed user's notes at that Reserve. The exit spend is **Planned**.
+:::
+
 The script reads its settings from the environment:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PRIVATE_KEY` | Required | The deployer's key. The deployer is the Chamber's first owner |
-| `CHAMBER_OWNER` | Zero | The final owner, a Safe. Required on chain ID 1 |
-| `GUARDIAN` | Zero | The guardian, set if not zero |
+| `PRIVATE_KEY` | Required | The deployer's key |
+| `CHAMBER_OWNER` | Zero | The owner, a Safe. Required outside the development chains |
+| `GUARDIAN` | Zero | The guardian, passed to the Chamber constructor. Required outside the development chains |
 | `DEV_FIXTURES` | `false` | Deploy a development Reserve, a mock asset and one registered user |
 | `USER_KEY_EXCHANGE` | 0 | The development user's key exchange. Required with `DEV_FIXTURES` |
 
-On chain ID 1, `validate` refuses development fixtures and the fixture key exchange `0x6b6579`, and requires `CHAMBER_OWNER` to be set, to differ from the deployer and to have code. On any other chain these rules do not apply: an unset `CHAMBER_OWNER` leaves the deployer's key as the owner, and `GUARDIAN` is not checked.
+`isTestChain(chainId)` is true for chain IDs 31337 and 11155111, the development chains. Every other chain is treated as production, and there `validate`:
+
+- refuses `DEV_FIXTURES` and the fixture key exchange `0x6b6579`;
+- requires `CHAMBER_OWNER` to be set, to differ from the deployer, and to be a multisig: a contract whose `getThreshold()` returns at least 2;
+- requires `GUARDIAN` to be set.
+
+On the two development chains none of this is checked, except that `DEV_FIXTURES` needs a non-zero `USER_KEY_EXCHANGE`. A development network has to be added to `isTestChain` before fixtures can be deployed there.
 
 The script then broadcasts, in order:
 
 1. `new ChamberVerifier()`.
-2. `new Chamber(deployer, verifier)`.
+2. `new Chamber(initialOwner, verifier, GUARDIAN)`. `initialOwner` is `CHAMBER_OWNER`, unless `DEV_FIXTURES` is set or no owner is named, in which case it is the deployer.
 3. `new ManagerSigRegistrar()`.
-4. `chamber.setGuardian(GUARDIAN)`, if set.
-5. With `DEV_FIXTURES`: a mock ERC-20, `registerReserve(deployer, 789, 987)`, `setAssetMinDeposit(asset, 1)`, a `USERS` grant to the registrar, and a registration of `H2(deployer, USER_KEY_EXCHANGE)` signed by the deployer with a deadline one hour out.
-6. `chamber.transferOwnership(CHAMBER_OWNER)`, if set and not the deployer. The Safe calls `acceptOwnership()` after the 7-day delay.
+4. With `DEV_FIXTURES`: a mock ERC-20, `registerReserve(deployer, 789, 987)`, `setAssetMinDeposit(asset, 1)`, a `USERS` grant to the registrar, and a registration of `H2(deployer, USER_KEY_EXCHANGE)` signed by the deployer with a deadline one hour out.
+5. `chamber.transferOwnership(CHAMBER_OWNER)`, only if an owner is named and the deployer holds the Chamber, which happens with `DEV_FIXTURES`. The owner calls `acceptOwnership()` after the 7-day delay.
 
-It writes the address book to `deployments/<chainId>.json`, with the Chamber, verifier, registrar, development Reserve and mock asset addresses. These pages list no deployed addresses.
+Outside the development chains the Chamber is therefore built owned by its Safe, with its guardian in place, and the deployer key never holds a power over it. It writes the address book to `deployments/<chainId>.json`, with the Chamber, verifier, registrar, development Reserve and mock asset addresses. These pages list no deployed addresses.
 
 `Poseidon2` in `lib/Poseidon.sol` exposes `public` functions, so it is deployed as its own library contract and linked into the contracts that hash.
 
@@ -74,8 +83,8 @@ The development Reserve has a fixed auditor key (789, 987), a mock asset, no scr
 
 ## After deployment
 
-1. **Ownership.** After 7 days the Safe named in `CHAMBER_OWNER` calls `acceptOwnership()`.
-2. **Guardian.** If none was set, the owner calls `setGuardian`.
+1. **Ownership.** With development fixtures and a named owner, the owner calls `acceptOwnership()` after 7 days. Otherwise the Chamber already has its final owner.
+2. **Guardian.** If none was named at construction, the owner calls `setGuardian`.
 3. **Reserves.** The owner calls `registerReserve(admin, keyHash, keyInputPoint)` for each Reserve, naming a Safe as admin.
 4. **Screener first.** The Reserve admin, or a `SCREENING` holder, calls `setScreener` before any asset is listed.
 5. **Registration.** The admin grants `USERS` to the registrar and to each signer.
