@@ -1,0 +1,103 @@
+---
+title: Joining a Reserve
+description: "The X-Wing key exchange, the registrar v3 signature a key holder makes, and what voids it."
+sidebar:
+  order: 6
+---
+
+A Reserve with members lets only members spend. `join` runs a key exchange with the Reserve's key holder, then registers the member's leaf through the registrar with a signature from a `USERS` holder.
+
+## The exchange
+
+A member's leaf is `H2(mistAddr, ukx)`, where `ukx` is the key exchange shared with the key holder. The leaf goes on-chain. The `ukx` does not. It must stay off-chain and have full entropy, or the leaf can be brute-forced.
+
+1. **Member.** `join` calls `encapsulate(managerPublicKey)`, which returns a `cipherText` and a shared secret, then derives `ukx = deriveUkx(secret, reserve, mistAddr)`.
+2. **Key holder.** `managerSide({ cipherText, reserve, mistAddr })` runs wherever the host provides it, usually a request to the Reserve's service. It calls `decapsulate`, derives the same `ukx`, computes the leaf and has a `USERS` holder sign the registrar digest. It receives the member's MIST Address.
+3. **Member.** `join` compares the two `ukx` values. A difference throws `Client and manager derived different ukx values`. Otherwise it sends `registrar.registerUser(reserve, leaf, deadline, signer, signature)` and stores the `ukx` in `client.ukx`.
+
+`managerKeys(privateKey)` derives the key holder's X-Wing key pair from an account key: `{ publicKey, secretKey }`. The wire sizes are in `SIZES`: 1216 bytes for the public key and 1120 for the ciphertext.
+
+X-Wing is a hybrid of ML-KEM-768 and X25519, so the key exchange is post-quantum. The proofs are Groth16 and the registration signature is ECDSA or ERC-1271. Neither is post-quantum.
+
+## The key holder's half
+
+`managerSide` returns a `ManagerApproval`.
+
+| Field | Meaning |
+| --- | --- |
+| `ukx` | The key exchange the key holder derived |
+| `signer` | The `USERS` holder that signed, as named in the digest |
+| `deadline` | The last valid second, in chain time, inclusive |
+| `signature` | 65 bytes `r ++ s ++ v` from an account, or an ERC-1271 signature from a contract |
+
+```ts
+import { createPublicClient, http, parseAbi } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { anvil } from "viem/chains";
+import { CORE_ABI, MistClient, decapsulate, deriveUkx, managerKeys, type AddressBook, type Hex } from "@mistcash/sdk";
+import type { FullProverAdapter } from "@mistcash/sdk/prover";
+
+declare const book: AddressBook;
+declare const client: MistClient;
+declare const prover: FullProverAdapter;
+declare const reserve: Hex;
+declare const KEY_HOLDER_KEY: Hex; // a key that holds USERS on the Reserve
+
+const abi = parseAbi(CORE_ABI);
+const publicClient = createPublicClient({ chain: anvil, transport: http() });
+const signer = privateKeyToAccount(KEY_HOLDER_KEY);
+const keys = managerKeys(KEY_HOLDER_KEY);
+
+await client.join({
+  id: "alice (MIST)",
+  reserve,
+  managerPublicKey: keys.publicKey,
+  managerSide: async ({ cipherText, reserve, mistAddr }) => {
+    const ukx = deriveUkx(decapsulate(cipherText, keys.secretKey), reserve, mistAddr);
+    const leaf = BigInt(await prover.hash2(mistAddr, ukx));
+    const deadline = (await publicClient.getBlock()).timestamp + 3600n;
+    // Read the digest just before signing: it binds values that move.
+    const digest = await publicClient.readContract({
+      address: book.registrar,
+      abi,
+      functionName: "registerUserDigest",
+      args: [reserve, leaf, signer.address, deadline],
+    });
+    return { ukx, signer: signer.address, deadline, signature: await signer.sign({ hash: digest }) };
+  },
+});
+```
+
+The registrar accepts a signature from any holder of `USERS` on the Reserve, and the registrar itself must hold `USERS` there too. Anyone can submit the registration, since the signature names the signer and not the submitter.
+
+## What the signature binds
+
+The digest is EIP-712. The domain is `MistReserveRegistrar`, version `3`, with the chain id and the registrar's address. The signed type is:
+
+```text
+RegisterUser(address reserve,uint256 leaf,uint256 leafNonce,uint256 revocations,address signer,uint256 signerEpoch,uint256 deadline)
+```
+
+Three of those values move on their own, which is why the digest is read just before signing.
+
+| Value | Read from | Moves when |
+| --- | --- | --- |
+| `leafNonce` | `Reserve.leafNonce(leaf)` | The leaf is added or removed. A signature works once, and a removed member needs a new one |
+| `revocations` | `registrar.revocations(reserve, leaf)` | `revokeRegistration` is called for the leaf |
+| `signerEpoch` | `Reserve.permissionEpoch(USERS, signer)` | The signer loses `USERS`, through `revokePermission` or an admin handover |
+
+## What voids a signature
+
+| Cause | Result at `registerUser` |
+| --- | --- |
+| The chain time passes `deadline` | `Registrar: signature expired` |
+| The leaf was registered or removed since signing | `Registrar: invalid signature` |
+| A `USERS` holder called `revokeRegistration` for the leaf | `Registrar: invalid signature` |
+| The signer lost `USERS` through a revoke or a handover | `Registrar: missing users permission` while it holds none, and `Registrar: invalid signature` if it holds the role again |
+| The signature does not match the digest | `Registrar: invalid signature` |
+
+Two more reverts come from the Reserve. `Reserve: missing permission` means the registrar does not hold `USERS`. `Reserve: user already registered` means the leaf is already in the tree.
+
+When the transaction reverts and the adapter throws, `join` records no membership. A contract signer's ERC-1271 check runs after the ECDSA check. `USERS` should go only to contracts whose ERC-1271 cannot approve arbitrary digests.
+
+Leaving is the Reserve's act. `removeUser` zeroes a member's leaf. See [Reserve administration](/sdk/reserve-administration/).
