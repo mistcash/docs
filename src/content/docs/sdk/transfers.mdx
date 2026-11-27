@@ -1,0 +1,133 @@
+---
+title: Private transfers and withdrawals
+description: "spend: note selection, tree-aware leaves, proving, and who submits a private payment or a withdrawal."
+sidebar:
+  order: 7
+---
+
+`spend` is the one call for a private payment inside MIST and for a withdrawal to a public address. It selects notes, builds the proof on the host, checks it against the Chamber and submits it.
+
+## Calling spend
+
+```ts
+import { MistClient, type Hex } from "@mistcash/sdk";
+
+declare const client: MistClient;
+declare const reserve: Hex;
+declare const amount: bigint;
+
+// A private payment from alice to bob
+await client.spend({ id: "alice (MIST)", amount, to: "bob (MIST)", reserve });
+
+// A withdrawal to the public account alice
+await client.spend({ id: "alice (MIST)", amount: 0n, withdraw: amount, withdrawTo: "alice", reserve });
+```
+
+`spend` returns `{ receipt, secs, commitments }`: the receipt, the proving time in seconds, and the commitments for the Reserve's key holder.
+
+| Option | Meaning |
+| --- | --- |
+| `id` | The spending identity |
+| `amount` | The value sent to `to`. Pass `0n` for a withdrawal, since a non-zero `amount` is a payment and needs `to` |
+| `to` | The recipient identity. Unset for a withdrawal |
+| `withdraw`, `withdrawTo` | A public payout and the account name that receives it. `withdrawTo` is required when `withdraw` is above zero |
+| `reserve` | The Reserve to spend at. Defaults to the Reserve of the first unspent note |
+| `notes` | The notes to choose from. Defaults to `client.notes` |
+| `blindingA`, `blindingB` | Blindings for the recipient's output and the change output. Random when unset |
+| `keyIndex` | An explicit key index. Drawn from the unused ones when unset |
+| `state` | Chain state the host fetched itself. Read through the adapter when unset |
+
+A spend can pay `amount` to `to` and withdraw `withdraw` in one proof. The selected notes cover `amount + withdraw`. The change goes back to `id`.
+
+## Note selection
+
+The circuit takes at most two inputs and produces two outputs, and both inputs are proven against one transaction tree. `pick` therefore takes the smallest single note that covers the total, or else the tightest pair from one tree. When no single note and no pair covers it, `spend` throws and the message says so. Sending part of the value to oneself merges notes.
+
+```ts
+import { plan, type Hex, type Note } from "@mistcash/sdk";
+
+declare const notes: Note[];
+declare const reserve: Hex;
+
+const result = plan({
+  id: "alice (MIST)",
+  amount: 5n,
+  reserve,
+  reserveUsers: 0n, // registeredUsersCount of the Reserve
+  isMember: false,
+  notes,
+  txTreeCapacity: 4 ** 10,
+});
+
+if ("error" in result) throw new Error(result.error);
+console.log(result.notes, result.change, result.txTree);
+```
+
+`plan` validates a spend before proving and returns `{ notes, amount, change, submitter, txTree }`, or `{ error }`. At a Reserve with members, a non-member gets `Reserve is members only: join it first.`.
+
+## Tree-aware leaves
+
+The Chamber opens a new transaction tree every `txTreeCapacity` leaves, which is 4^10 or 1,048,576. A note's `txIndex` fixes its tree: tree `t` holds `txArray[t * capacity, (t + 1) * capacity)`.
+
+- `spend` reads each note's `txIndex`, or finds it from the note hash through `noteIndexPlusOne`. With fetched state it spends only notes it can find in a tree.
+- It hands the prover that one tree's leaves, from `txTreeLeaves(treeId)`. The client reads them through `getTxArray(offset, limit)` in pages of 1,024 leaves, eight reads at a time, up to `txCount`.
+- With the `state` option the host supplies the leaves, and `state.txLeaves` must be the leaves of the one tree that holds the input notes.
+
+The prover also takes the zkState tree and the Reserve's users tree. `registeredUserLeaves(reserve)` returns the users tree by index with removed members as `"0"`. `zkStateLeaves()` returns the zkState tree.
+
+## Proving
+
+1. `spend` refuses with `Spends are paused.` while the guardian has paused spends.
+2. It checks that the member's leaf, `H2(owner, ukx)`, is still in the users tree. A removed member gets `This reserve no longer lists you as a member: join it again.`.
+3. It builds the request and calls `prover.spend`. The result is 8 proof elements and 14 public inputs, plus commitments at a Reserve with members.
+4. It asks the Chamber whether the proof's zkState root is still valid. A superseded root stays valid for 10 minutes. If the Chamber would reject it, `spend` throws `The reserve state changed while proving: spend again.`, and nothing is submitted or recorded.
+5. It submits `handleZkp`, marks the inputs `spent` with their `nullifier`, and records the output notes with their `txIndex` from `NoteAppended`.
+
+`callbacks.onProof` receives the proving time. Proving blocks the thread it runs on, so a browser uses a worker. See [Prover backends](/sdk/prover-backends/).
+
+## Who submits
+
+The notes' owner decides who may submit.
+
+| Owner | `auth_done` | Who may submit | What the observer learns |
+| --- | --- | --- | --- |
+| A MIST Address, `alice (MIST)` | 1 | Anyone, a relayer for example. The proof shows knowledge of the secret | Two nullifiers and two new note hashes. The sender stays hidden |
+| A wallet address, `alice` | 0 | Only that wallet. The Chamber requires `msg.sender` to equal the owner and reverts `only owner caller` otherwise | The spend publishes the owner, so it links to the address |
+
+The SDK sends every transaction through `chain.sendTransaction`. The adapter decides which account signs. For a MIST identity the progress stage is `Relayer submitting`. For a public identity it is `Submitting`, and the adapter must send from the owner's account.
+
+```ts
+import { createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { anvil } from "viem/chains";
+import { MistClient, type AddressBook, type ChainAdapter, type Hex } from "@mistcash/sdk";
+import type { FullProverAdapter } from "@mistcash/sdk/prover";
+
+declare const book: AddressBook;
+declare const prover: FullProverAdapter;
+declare const reserve: Hex;
+declare const RELAYER_KEY: Hex;
+declare const alice: Hex; // the public address behind the name "alice"
+declare const aliceSecret: string; // the secret behind "alice (MIST)"
+declare const chainAdapter: (wallet: ReturnType<typeof createWalletClient>) => ChainAdapter; // from the quick start
+
+const relayerWallet = createWalletClient({ chain: anvil, transport: http(), account: privateKeyToAccount(RELAYER_KEY) });
+
+// Every transaction this client sends is paid for by the relayer account.
+const client = new MistClient({
+  book,
+  chainId: anvil.id,
+  chain: chainAdapter(relayerWallet),
+  prover,
+  addressOf: () => alice,
+  secretOf: () => aliceSecret,
+});
+
+await client.spend({ id: "alice (MIST)", amount: 0n, withdraw: 1n, withdrawTo: "alice", reserve });
+```
+
+## What a spend reveals
+
+A withdrawal reveals its amount, asset, Reserve and recipient, and hides among its own Reserve's notes. A payment inside MIST hides among every Reserve's notes. Sender privacy holds only for notes owned by a MIST Address.
+
+At a Reserve with members the key holder sees the sender, the asset and both output amounts of each member spend. Recipients appear only as output commitments. `spend` returns those commitments, and `handleZkp` carries them. [Reserve administration](/sdk/reserve-administration/) covers reading them.
