@@ -1,0 +1,314 @@
+/* MIST.cash docs: the diagram grammar.
+ *
+ * One diagram language, from landing/DESIGN.md ("The Record"):
+ *   note or payment  a square cell (empty, recorded, followed, hidden, shared)
+ *   reserve          a tall panel, 1px strong border, name, rule chips, lock line
+ *   shared record    an azure field holding cells, labelled in uppercase
+ *   movement         a 1px lane; a coral square is the payment being followed
+ *   labels           uppercase label at the top-left of their region
+ * Square corners, 1px rules, no shadow, no gradient. Horizontal sequences
+ * become vertical stacks at phone width instead of shrinking type.
+ * Everything reads colours from the --mist-* surface variables, so the same
+ * markup holds in both themes and on the azure field.
+ */
+
+/* Cells */
+.mist-cell {
+  display: block;
+  aspect-ratio: 1;
+  width: var(--cell, 1.5rem);
+  flex: none;
+  border: 1px solid var(--mist-line);
+}
+.mist-cell[data-state="recorded"] {
+  background: var(--mist-line);
+  border-color: var(--mist-line-strong);
+}
+.mist-cell[data-state="followed"] {
+  background: var(--mist-coral);
+  border-color: var(--mist-coral);
+}
+.mist-cell[data-state="shared"] {
+  border-color: var(--mist-coral);
+}
+.mist-cell[data-state="hidden"] {
+  background: var(--mist-fg);
+  border-color: var(--mist-fg);
+}
+
+/* The record strip that closes every page */
+.mist-strip {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  overflow: hidden;
+}
+.mist-strip .mist-cell {
+  width: auto;
+  flex: 1;
+  min-width: 10px;
+}
+@media (max-width: 36rem) {
+  .mist-strip [data-phone-hidden] {
+    display: none;
+  }
+}
+.mist-footer-record {
+  max-width: var(--sl-content-width);
+  margin-top: 3rem;
+}
+@media (min-width: 72rem) {
+  .mist-footer-record {
+    margin-inline: var(--sl-content-margin-inline, auto);
+  }
+}
+
+/* Labels name things inside a diagram. Never a kicker above a heading. */
+.mist-label {
+  margin: 0;
+  font-family: var(--mist-font-text);
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg-3);
+}
+
+/* Chips: states and rules inside a diagram */
+.mist-chip {
+  display: inline-block;
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--mist-line-strong);
+  border-radius: var(--mist-radius);
+  font-family: var(--mist-font-text);
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg);
+  list-style: none;
+}
+
+/* Movement lanes: a 1px rule */
+.mist-lane {
+  display: block;
+  flex: 1;
+  min-width: 1.25rem;
+  height: 0;
+  border-top: 1px solid var(--mist-line-strong);
+}
+
+/* Figure and stage */
+.mist-figure {
+  margin: 2rem 0 2.5rem;
+}
+.mist-figure figcaption {
+  margin-top: 0.75rem;
+  font-size: var(--mist-t-small);
+  line-height: 1.55;
+  color: var(--mist-fg-3);
+  max-width: 65ch;
+}
+.mist-diagram {
+  padding: 1.5rem;
+  border: 1px solid var(--mist-line);
+  background: var(--mist-panel);
+  color: var(--mist-fg);
+}
+@media (min-width: 50rem) {
+  .mist-diagram {
+    padding: 2rem 2.25rem;
+  }
+}
+
+/* Three moves of a note's life */
+.mist-moves {
+  display: grid;
+  gap: 2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mist-moves > li {
+  margin: 0;
+}
+.mist-move {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+  grid-template-rows: auto auto 1fr;
+}
+.mist-move__stage {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 3rem;
+}
+.mist-move .mist-lane {
+  min-width: 0.75rem;
+}
+.mist-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mist-move__note {
+  margin: 0;
+  font-size: var(--mist-t-small);
+  line-height: 1.55;
+  color: var(--mist-fg-2);
+}
+@media (min-width: 40rem) {
+  .mist-moves {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+  }
+  .mist-moves > li + li {
+    padding-left: 1.5rem;
+    margin-left: 1.5rem;
+    border-left: 1px solid var(--mist-line);
+  }
+}
+@media (max-width: 39.99rem) {
+  .mist-moves > li + li {
+    padding-top: 2rem;
+    border-top: 1px solid var(--mist-line);
+  }
+}
+
+/* The shared record: an azure field that owns its region */
+.mist-record {
+  --mist-fg: var(--mist-fog);
+  --mist-fg-2: rgb(238 242 255 / 0.84);
+  --mist-fg-3: rgb(238 242 255 / 0.84);
+  --mist-line: rgb(238 242 255 / 0.26);
+  --mist-line-strong: rgb(238 242 255 / 0.6);
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--mist-azure);
+  color: var(--mist-fog);
+}
+@media (min-width: 50rem) {
+  .mist-record {
+    padding: 1.5rem 1.75rem;
+  }
+}
+.mist-record .mist-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  --cell: 1.25rem;
+}
+.mist-record__parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Architecture */
+.mist-arch {
+  display: grid;
+  gap: 0;
+}
+.mist-arch__proof {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.mist-arch__proof .mist-lane {
+  flex: none;
+  min-width: 2rem;
+}
+.mist-arch__reserves {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2.25rem;
+  position: relative;
+}
+/* A 1px lane from each Reserve up to the record */
+.mist-arch__reserves .mist-reserve::before {
+  content: "";
+  position: absolute;
+  top: -2.25rem;
+  left: 50%;
+  height: 2.25rem;
+  border-left: 1px solid var(--mist-line-strong);
+}
+@media (min-width: 40rem) {
+  .mist-arch__reserves {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 39.99rem) {
+  .mist-arch__reserves {
+    margin-top: 1rem;
+  }
+  .mist-arch__reserves .mist-reserve::before {
+    display: none;
+  }
+}
+
+/* Reserve: a tall panel */
+.mist-reserve {
+  position: relative;
+  display: grid;
+  gap: 0.875rem;
+  align-content: start;
+  min-height: 9rem;
+  padding: 1.25rem;
+  border: 1px solid var(--mist-line-strong);
+  background: transparent;
+}
+.mist-reserve__name {
+  margin: 0;
+  font-family: var(--mist-font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  color: var(--mist-fg);
+}
+.mist-reserve__rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mist-lock {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  align-self: end;
+  font-size: var(--mist-t-small);
+  color: var(--mist-fg-2);
+}
+.mist-lock svg {
+  flex: none;
+}
+
+/* Hero record field */
+.mist-field {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  gap: 6px;
+  width: 100%;
+}
+.mist-field .mist-cell {
+  width: auto;
+}
+@media (max-width: 49.99rem) {
+  .mist-field [data-phone-hidden] {
+    display: none;
+  }
+}

@@ -1,0 +1,28 @@
+---
+// The site's signature motif: the shared record as a run of identical note
+// cells, one of them coral. Ported from landing/src/components/ui/RecordStrip.
+// Decorative only, so it is hidden from assistive tech.
+interface Props {
+  cells?: number;
+  /** Index of the coral cell, or -1 for none. */
+  highlight?: number;
+  /** Cells shown on a phone; the rest are hidden. */
+  mobileCells?: number;
+}
+
+const { cells = 48, highlight = 13, mobileCells = 20 } = Astro.props;
+const pattern = [1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0];
+const items = Array.from({ length: cells }, (_, i) => ({
+  i,
+  state: i === highlight ? "followed" : pattern[i % pattern.length] === 1 ? "recorded" : "empty",
+  hideOnPhone: i >= mobileCells,
+}));
+---
+
+<div class="mist-strip" aria-hidden="true">
+  {
+    items.map((c) => (
+      <span class="mist-cell" data-state={c.state} data-phone-hidden={c.hideOnPhone ? "" : undefined} />
+    ))
+  }
+</div>

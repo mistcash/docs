@@ -1,0 +1,27 @@
+---
+// The hero's record field: a grid of identical note cells with one coral cell.
+// Decorative, so hidden from assistive tech. On phones only the first rows show.
+const cols = 10;
+const rows = 8;
+const filled = [
+  "1101110101",
+  "0111011010",
+  "1011101110",
+  "1110101101",
+  "0101110111",
+  "1011011010",
+  "1101101110",
+  "0111010111",
+];
+const hot = { row: 3, col: 4 };
+const cells = filled.flatMap((r, row) =>
+  [...r].map((c, col) => ({
+    state: row === hot.row && col === hot.col ? "followed" : c === "1" ? "recorded" : "empty",
+    phoneHidden: row >= 5,
+  })),
+);
+---
+
+<div class="mist-field" style={`--cols:${cols};--rows:${rows}`} aria-hidden="true">
+  {cells.map((c) => <span class="mist-cell" data-state={c.state} data-phone-hidden={c.phoneHidden ? "" : undefined} />)}
+</div>

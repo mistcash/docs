@@ -1,64 +1,57 @@
 ---
 title: Introduction
-description: Privacy-focused SDK for zero-knowledge transactions on Starknet.
+description: "MIST.cash is a protocol for private stablecoin payments on EVM chains. A zero-knowledge proof moves value between private notes, and each Reserve enforces its own compliance rules."
+template: splash
+hero:
+  title: Private payments under each Reserve's rules
+  tagline: MIST moves ERC-20 assets between private notes on an EVM chain. A zero-knowledge proof authorises each move. Each Reserve enforces its own compliance rules.
+  actions:
+    - text: How MIST works
+      link: /how-it-works/
+      variant: primary
+    - text: Architecture
+      link: /architecture/
+      variant: secondary
 ---
 
-import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+import RuledIndex from "../../components/RuledIndex.astro";
 
-MIST.cash SDK is a TypeScript toolkit for building privacy-preserving applications on [Starknet](https://starknet.io). It enables zero-knowledge proof-based private transactions using Groth16 proofs, Poseidon hashing, and Merkle trees.
+## What MIST is
 
-## Why MIST.cash?
+MIST is a protocol for private payments of ERC-20 assets on EVM chains. Value lives in private notes. A note is a hash that commits to an amount of one asset, its owner and the Reserve that holds it. Nobody can read a note from the chain. Its owner proves facts about it in zero knowledge.
 
-Traditional blockchain transactions are fully transparent — sender, receiver, and amount are all publicly visible. MIST.cash breaks this link using zero-knowledge cryptography, allowing users to deposit, transfer, and withdraw tokens without revealing the connection between sender and receiver.
+A spend consumes up to two notes and creates two new ones. It can also pay part of the value out to a public address. Observers see two nullifiers and two new note hashes. They do not see who was paid, which asset or how much.
 
-## Architecture
+## Separate custody, one shared record
 
-The SDK is organized as a monorepo with three packages:
+Two kinds of contract split the work.
 
-<CardGrid>
-  <Card title="@mistcash/sdk" icon="rocket">
-    Core cryptographic engine — WASM-powered Poseidon hashing, Groth16 proof
-    generation, Merkle tree operations, and Chamber contract utilities.
-  </Card>
-  <Card title="@mistcash/config" icon="setting">
-    Shared configuration — contract ABIs, addresses, supported token
-    definitions, and TypeScript types.
-  </Card>
-  <Card title="@mistcash/react" icon="puzzle">
-    React integration — the `useMist` hook for managing deposits, withdrawals,
-    and proof generation from React applications.
-  </Card>
-</CardGrid>
+- A **Reserve** holds the assets of the notes in its custody and stands for one compliance rule set. Its admin grants the permissions that run it: registering users, screening deposits, listing assets and updating metadata.
+- The **Chamber** keeps the record of every note, the spent markers and the list of Reserves. It verifies each proof and holds no assets.
 
-## How It Works
+Funds under different rules never mix. Private payments from every Reserve are recorded in the same Chamber, so they look alike.
 
-1. **Deposit** — A user deposits tokens into the Chamber contract along with a cryptographic commitment (hash of a secret).
-2. **Privacy** — The deposit is added to a Merkle tree. The link between depositor and the commitment is the only public information.
-3. **Withdraw** — A different address generates a zero-knowledge proof showing knowledge of a valid commitment in the tree, without revealing which one. Tokens are sent to the new address.
+## Compliance per Reserve
 
-The zero-knowledge proof is generated client-side using a Go-compiled WASM module (Gnark) and verified on-chain via the [Garaga](https://garaga.dev) verifier.
+A Reserve can switch on four rules.
 
-## Quick Links
+- **Asset list.** A Reserve accepts only the assets its admin lists, each with a minimum deposit.
+- **Registration.** At a Reserve with members, only registered users can spend. A registered user can later be removed.
+- **Deposit screening.** A screener approves or rejects each deposit before its note joins the record. A depositor can always reclaim a pending deposit. A rejected deposit is refunded to the address the depositor named, the depositor by default.
+- **Key-holder visibility.** At a Reserve with members, every spend publishes its details encrypted for whoever holds the members' key exchanges: the sender, the asset and the amounts. Recipients appear only as commitments.
 
-<CardGrid>
-  <LinkCard
-    title="Getting Started"
-    description="Install the SDK and make your first privacy-preserving transaction."
-    href="/getting-started"
-  />
-  <LinkCard
-    title="Core SDK"
-    description="Hashing, proofs, Merkle trees, and contract utilities."
-    href="/packages/core"
-  />
-  <LinkCard
-    title="React Hook"
-    description="Integrate MIST.cash into your React + Starknet app."
-    href="/packages/react"
-  />
-  <LinkCard
-    title="API Reference"
-    description="Complete function signatures and type definitions."
-    href="/reference/api"
-  />
-</CardGrid>
+:::note[Scope of these docs]
+These pages follow the protocol specification, which is the document of record, and the contracts in mistcash/core `main`. Where the specification describes something that is not built yet, the page says Planned. The protocol is pre-production: its keys come from a single-party setup.
+:::
+
+## Where to go next
+
+<RuledIndex
+  items={[
+    { href: "/how-it-works/", title: "How MIST works", body: "Notes, owners, nullifiers, the three moves of a payment and who sees what." },
+    { href: "/architecture/", title: "Architecture", body: "The Chamber, Reserves, the verifier, the cryptography and the trust model." },
+    { href: "/circuits/", title: "Circuits", body: "The Groth16 circuit behind every spend: its inputs, its checks and its cost." },
+    { href: "/contracts/", title: "Contracts", body: "Chamber, Reserve, ChamberVerifier and ManagerSigRegistrar." },
+    { href: "/sdk/", title: "SDK", body: "@mistcash/sdk: proving on the user's device and the client for the contracts." },
+  ]}
+/>

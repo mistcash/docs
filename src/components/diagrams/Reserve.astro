@@ -1,0 +1,23 @@
+---
+// A Reserve: a tall panel with a 1px strong border, its name, its rules as
+// chips and a lock line saying its funds stay put.
+import Icon from "../Icon.astro";
+
+interface Props {
+  name: string;
+  rules: string[];
+  lock?: string;
+}
+const { name, rules, lock = "Holds its own funds" } = Astro.props;
+---
+
+<div class="mist-reserve">
+  <p class="mist-reserve__name">{name}</p>
+  <ul class="mist-reserve__rules">
+    {rules.map((r) => <li class="mist-chip">{r}</li>)}
+  </ul>
+  <p class="mist-lock">
+    <Icon name="lock" size={16} />
+    <span>{lock}</span>
+  </p>
+</div>

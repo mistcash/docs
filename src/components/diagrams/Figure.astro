@@ -1,0 +1,17 @@
+---
+// Wraps a diagram with its caption. The figure is the unit that scrolls,
+// stacks or re-flows; captions sit under it in small text.
+interface Props {
+  caption?: string;
+  /** Accessible description of what the drawing shows, for screen readers. */
+  label: string;
+}
+const { caption, label } = Astro.props;
+---
+
+<figure class="mist-figure not-content">
+  <div class="mist-diagram" role="img" aria-label={label}>
+    <slot />
+  </div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

@@ -1,0 +1,45 @@
+---
+// A note's life in three moves: deposit, private payment, withdrawal.
+// One coral cell is the note being followed. Moves are vertical stacks at
+// phone width and a row of three from the sm breakpoint.
+import Figure from "./Figure.astro";
+import Cell from "./Cell.astro";
+import Chip from "./Chip.astro";
+---
+
+<Figure
+  label="A note's life in three moves. Deposit: assets enter a Reserve and one note is recorded. Private payment: two input notes are spent and two new notes are recorded. Withdrawal: a note pays out to a public address."
+  caption="A payment in three moves. The coral cell is the note the private payment creates. Observers see the public parts of the first and last move, and only nullifiers and new note hashes in the middle."
+>
+  <ol class="mist-moves">
+    <li class="mist-move">
+      <p class="mist-label">1 Deposit</p>
+      <div class="mist-move__stage">
+        <Chip>Public wallet</Chip>
+        <span class="mist-lane" aria-hidden="true"></span>
+        <Chip>Reserve</Chip>
+        <span class="mist-lane" aria-hidden="true"></span>
+        <Cell state="recorded" />
+      </div>
+      <p class="mist-move__note">Assets move into the Reserve. A note joins the record.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">2 Private payment</p>
+      <div class="mist-move__stage">
+        <span class="mist-pair"><Cell state="recorded" /><Cell state="empty" /></span>
+        <span class="mist-lane" aria-hidden="true"></span>
+        <span class="mist-pair"><Cell state="recorded" /><Cell state="followed" /></span>
+      </div>
+      <p class="mist-move__note">Two notes are spent and two are created. Nothing leaves the Reserve.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">3 Withdrawal</p>
+      <div class="mist-move__stage">
+        <Cell state="recorded" />
+        <span class="mist-lane" aria-hidden="true"></span>
+        <Chip>Public address</Chip>
+      </div>
+      <p class="mist-move__note">The amount, asset, Reserve and recipient become public.</p>
+    </li>
+  </ol>
+</Figure>

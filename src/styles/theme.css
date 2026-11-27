@@ -1,0 +1,710 @@
+/* MIST.cash docs: Starlight restyled to the landing design (landing/DESIGN.md).
+ *
+ * Swiss and editorial: flat fields, 1px rules, square corners (2px on
+ * controls), no shadow, no glow, no gradient text. Josefin Sans sets headings,
+ * Sen sets everything read, the system monospace sets code. Coral is the one
+ * action and at most one marker per view; light mode swaps the marker to azure
+ * because coral on fog is under 3:1. Tokens live in tokens.css.
+ *
+ * These rules are unlayered, so they win over Starlight's layered defaults.
+ */
+
+/* ---------------------------------------------------------------- Base */
+
+html {
+  overflow-x: clip;
+  background: var(--mist-midnight);
+  scrollbar-color: rgb(238 242 255 / 0.28) var(--mist-midnight);
+  -webkit-text-size-adjust: 100%;
+}
+:root[data-theme="light"] {
+  background: var(--mist-fog);
+  scrollbar-color: rgb(1 5 17 / 0.3) var(--mist-fog);
+}
+
+body {
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  font-family: var(--mist-font-text);
+  font-feature-settings: "kern";
+  caret-color: var(--mist-coral);
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--mist-coral);
+  color: var(--mist-midnight);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+p,
+li,
+dd {
+  text-wrap: pretty;
+}
+
+:focus-visible {
+  outline: 2px solid var(--mist-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* -------------------------------------------------------------- Header */
+
+.page > .header {
+  border-bottom: 1px solid var(--mist-line);
+  background: var(--mist-midnight);
+}
+
+/* Search trigger reads as an input: 40px, 1px strong border, 2px corners. */
+site-search button[data-open-modal] {
+  min-height: 2.5rem;
+  border: 1px solid var(--mist-line-strong);
+  border-radius: var(--mist-radius);
+  background: transparent;
+  color: var(--mist-fg-2);
+  font-family: var(--mist-font-text);
+  font-size: 0.9375rem;
+  transition:
+    border-color 160ms var(--mist-ease),
+    color 160ms var(--mist-ease);
+}
+site-search button[data-open-modal]:hover {
+  border-color: var(--mist-fg);
+  color: var(--mist-fg);
+}
+site-search button[data-open-modal] kbd {
+  border: 1px solid var(--mist-line-strong);
+  border-radius: var(--mist-radius);
+  font-family: var(--mist-font-text);
+  font-size: 0.75rem;
+}
+@media (min-width: 50rem) {
+  site-search button[data-open-modal] {
+    min-width: 12rem;
+    padding-inline: 0.875rem;
+  }
+}
+
+/* Search modal: flat, framed, no shadow. */
+site-search dialog {
+  border: 1px solid var(--mist-line-strong);
+  border-radius: 0;
+  background: var(--sl-color-bg);
+  box-shadow: none;
+}
+site-search dialog .pagefind-ui__search-input,
+site-search dialog input {
+  border-radius: var(--mist-radius);
+}
+site-search dialog .pagefind-ui__result-link {
+  color: var(--mist-fg);
+}
+site-search dialog .pagefind-ui__result-inner > a::after {
+  content: none;
+}
+site-search .pagefind-ui__result {
+  border-top-color: var(--mist-line);
+}
+site-search .pagefind-ui__result-excerpt mark {
+  background: transparent;
+  color: var(--mist-fg);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* The scrim dims the page. It does not blur it. */
+site-search dialog::backdrop {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--sl-color-backdrop-overlay);
+}
+
+/* Mobile menu toggle: a square control, not Starlight's circle. */
+starlight-menu-button button {
+  border: 1px solid var(--mist-line-strong);
+  border-radius: var(--mist-radius);
+  background: transparent;
+  color: var(--mist-fg);
+  box-shadow: none;
+  padding: 0;
+}
+@media (max-width: 49.99rem) {
+  starlight-menu-button button {
+    display: grid;
+    place-items: center;
+  }
+}
+starlight-menu-button button svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+starlight-menu-button[aria-expanded="true"] button {
+  background: color-mix(in srgb, var(--mist-fg) 8%, transparent);
+}
+
+/* Theme select and social icons keep the header's dark surface. */
+starlight-theme-select select {
+  border-radius: var(--mist-radius);
+  border: 1px solid var(--mist-line-strong);
+  background-color: transparent;
+}
+.social-icons a {
+  border-radius: var(--mist-radius);
+}
+
+/* ------------------------------------------------------------- Sidebar */
+
+.sidebar-pane {
+  background: var(--sl-color-bg-sidebar);
+  border-inline-end: 1px solid var(--mist-line);
+}
+@media (min-width: 50rem) {
+  .sidebar-pane {
+    top: var(--sl-nav-height);
+  }
+}
+
+/* Group headings are column labels, as in the landing footer. */
+.sidebar-content .large {
+  font-family: var(--mist-font-text);
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg-3);
+}
+.sidebar-content summary {
+  padding-block: 0.375rem;
+}
+
+.sidebar-content a {
+  border-radius: 0;
+  padding: 0.4375rem 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: var(--mist-fg-2);
+  text-decoration: none;
+  transition: color 160ms var(--mist-ease);
+}
+.sidebar-content a:hover {
+  color: var(--mist-fg);
+}
+/* The current page: full text colour and a 2px rule in the text colour. Coral
+   is kept for the one action and the one marker of a view. */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  background: transparent;
+  color: var(--mist-fg);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--mist-fg);
+}
+
+/* Table of contents */
+.right-sidebar {
+  border-inline-start: 1px solid var(--mist-line);
+}
+.right-sidebar h2 {
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg-3);
+}
+starlight-toc a,
+mobile-starlight-toc a {
+  border-radius: 0;
+  font-size: 0.875rem;
+  color: var(--mist-fg-2);
+}
+starlight-toc a:hover,
+mobile-starlight-toc a:hover {
+  color: var(--mist-fg);
+}
+starlight-toc a[aria-current="true"],
+mobile-starlight-toc a[aria-current="true"] {
+  color: var(--mist-fg);
+  font-weight: 600;
+}
+mobile-starlight-toc nav {
+  border-color: var(--mist-line);
+  background: var(--sl-color-bg);
+}
+
+/* ------------------------------------------------------------- Content */
+
+/* The title is the one display line on a content page. */
+.content-panel h1,
+.content-panel #_top {
+  font-family: var(--mist-font-display);
+  font-size: var(--mist-t-h1);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  color: var(--mist-fg);
+}
+main > .content-panel:first-of-type {
+  padding-top: clamp(2rem, 1.4rem + 2vw, 3.5rem);
+  padding-bottom: 0;
+  border: 0;
+}
+[data-has-hero] main > .content-panel:first-of-type {
+  padding-top: 1.5rem;
+}
+main > .content-panel + .content-panel {
+  border-top: 0;
+  padding-top: 1.5rem;
+}
+
+.sl-markdown-content {
+  font-size: var(--mist-t-body);
+  line-height: 1.65;
+}
+
+.sl-markdown-content :is(h2, h3, h4):not(:where(.not-content *)) {
+  font-family: var(--mist-font-display);
+  color: var(--mist-fg);
+  text-wrap: balance;
+}
+.sl-markdown-content h2:not(:where(.not-content *)) {
+  font-size: var(--mist-t-h2);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+.sl-markdown-content h3:not(:where(.not-content *)) {
+  font-size: var(--mist-t-h3);
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+}
+.sl-markdown-content h4:not(:where(.not-content *)) {
+  font-size: 1.1875rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+/* Space above a heading is always larger than space below it. */
+.sl-markdown-content
+  :not(h1, h2, h3, h4, h5, h6)
+  + :is(h2, h3, h4):not(:where(.not-content *)) {
+  margin-top: clamp(2.5rem, 2rem + 2vw, 3.5rem);
+}
+.sl-markdown-content :is(h2, h3, h4) + *:not(:where(.not-content *)) {
+  margin-top: 0.875rem;
+}
+.sl-heading-wrapper .anchor-link {
+  color: var(--mist-fg-3);
+}
+
+/* Prose runs at 65ch maximum. */
+.sl-markdown-content :is(p, li, dd):not(:where(.not-content *)) {
+  max-width: 65ch;
+}
+/* The paragraph under a title is the lede. */
+.sl-markdown-content > p:first-child {
+  max-width: 46ch;
+  font-size: var(--mist-t-lede);
+  line-height: 1.5;
+  color: var(--mist-fg-2);
+}
+
+.sl-markdown-content strong {
+  color: var(--mist-fg);
+  font-weight: 700;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--mist-accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: color-mix(in srgb, var(--mist-accent-text) 45%, transparent);
+  transition: text-decoration-color 160ms var(--mist-ease);
+}
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  color: var(--mist-fg);
+  text-decoration-color: var(--mist-marker);
+}
+
+.sl-markdown-content ::marker {
+  color: var(--mist-fg-3);
+}
+.sl-markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--mist-line);
+}
+.sl-markdown-content blockquote {
+  margin-inline: 0;
+  padding-inline-start: 1.25rem;
+  border-inline-start: 2px solid var(--mist-line-strong);
+  color: var(--mist-fg-2);
+}
+
+/* Inline code is data: the system monospace on a panel, 1px hairline. */
+.sl-markdown-content code:not(:where(.not-content *)) {
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--mist-line);
+  border-radius: 0;
+  background: var(--mist-panel);
+  color: var(--mist-fg);
+  font-family: var(--mist-font-mono);
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+}
+.sl-markdown-content :is(h1, h2, h3, h4) code:not(:where(.not-content *)) {
+  font-size: 0.8em;
+  font-weight: 400;
+}
+.sl-markdown-content pre code:not(:where(.not-content *)) {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+/* ---------------------------------------------------------- Code blocks */
+/* Expressive Code takes its colours from the config's themes; the frame is
+   squared here. */
+.expressive-code .frame,
+.expressive-code pre,
+.expressive-code .frame .header {
+  border-radius: 0;
+}
+/* Terminal blocks drop the window bar and its three dots: a code block is a
+   flat panel with a 1px border, like every other panel. */
+.expressive-code .frame.is-terminal .header {
+  display: none;
+}
+.expressive-code .copy button {
+  border-radius: var(--mist-radius);
+}
+
+/* -------------------------------------------------------------- Tables */
+
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border: 1px solid var(--mist-line);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+/* Wide tables scroll inside their frame on phones; from 40rem they fill it. */
+@media (min-width: 40rem) {
+  .sl-markdown-content table:not(:where(.not-content *)) {
+    display: table;
+  }
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--mist-line);
+  text-align: start;
+  vertical-align: top;
+}
+.sl-markdown-content td:not(:where(.not-content *)) {
+  min-width: 8rem;
+}
+.sl-markdown-content :is(td:first-child, th) code:not(:where(.not-content *)) {
+  white-space: nowrap;
+}
+.sl-markdown-content td code:not(:where(.not-content *)) {
+  overflow-wrap: anywhere;
+}
+.sl-markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+.sl-markdown-content thead th:not(:where(.not-content *)) {
+  background: var(--mist-panel);
+  border-bottom: 1px solid var(--mist-line-strong);
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg-3);
+  white-space: nowrap;
+}
+.sl-markdown-content tbody td:first-child:not(:where(.not-content *)) {
+  color: var(--mist-fg);
+}
+.sl-markdown-content tbody tr:nth-child(even) td {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------- Asides */
+/* Square panels with a 2px rule. Status is said in the title, not in a hue:
+   information takes azure, a warning takes coral. */
+
+.starlight-aside {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--mist-line);
+  border-inline-start: 2px solid var(--sl-color-asides-border);
+  border-radius: 0;
+  background: var(--mist-panel);
+  color: var(--mist-fg-2);
+}
+.starlight-aside--note,
+.starlight-aside--tip {
+  --sl-color-asides-text-accent: var(--mist-fg);
+  --sl-color-asides-border: var(--mist-accent-text);
+  background: var(--mist-panel);
+}
+.starlight-aside--caution,
+.starlight-aside--danger {
+  --sl-color-asides-text-accent: var(--mist-fg);
+  --sl-color-asides-border: var(--sl-color-orange);
+  background: var(--mist-panel);
+}
+.starlight-aside--danger {
+  border-color: var(--sl-color-orange);
+}
+.starlight-aside__icon {
+  display: none;
+}
+.starlight-aside__title {
+  font-family: var(--mist-font-text);
+  font-size: var(--mist-t-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mist-fg-3);
+}
+.starlight-aside__content {
+  font-size: 1rem;
+}
+.starlight-aside__content a {
+  color: var(--mist-accent-text);
+}
+
+/* ------------------------------------------------- Steps, tabs, cards */
+
+.sl-steps > li {
+  --bullet-size: 1.75rem;
+}
+.sl-steps > li::before {
+  border-radius: 0;
+  border: 1px solid var(--mist-line-strong);
+  background: transparent;
+  color: var(--mist-fg);
+  font-family: var(--mist-font-text);
+  font-weight: 600;
+  box-shadow: none;
+}
+.sl-steps > li::after {
+  background: var(--mist-line);
+}
+
+starlight-tabs [role="tab"] {
+  border-radius: 0;
+  font-weight: 600;
+  color: var(--mist-fg-2);
+}
+starlight-tabs [role="tab"][aria-selected="true"] {
+  color: var(--mist-fg);
+  border-bottom-color: var(--mist-fg);
+}
+
+.sl-markdown-content .card,
+.sl-markdown-content .sl-link-card {
+  border: 1px solid var(--mist-line);
+  border-radius: 0;
+  background: var(--mist-panel);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------ Pagination */
+
+.pagination-links a {
+  border: 1px solid var(--mist-line-strong);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: border-color 160ms var(--mist-ease);
+}
+.pagination-links a:hover {
+  border-color: var(--mist-fg);
+}
+.pagination-links .link-title {
+  font-family: var(--mist-font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mist-fg);
+}
+.pagination-links span {
+  color: var(--mist-fg-3);
+}
+footer.sl-flex {
+  font-size: var(--mist-t-small);
+}
+
+/* ------------------------------------------------------------- Buttons */
+
+.mist-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  min-height: 3rem;
+  padding: 0 1.375rem;
+  border: 1px solid var(--btn-border, var(--mist-line-strong));
+  border-radius: var(--mist-radius);
+  background: var(--btn-bg, transparent);
+  color: var(--btn-fg, var(--mist-fg));
+  font-family: var(--mist-font-text);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 160ms var(--mist-ease),
+    border-color 160ms var(--mist-ease),
+    color 160ms var(--mist-ease);
+}
+.mist-btn svg {
+  flex: none;
+  transition: transform 320ms var(--mist-ease);
+}
+.mist-btn:hover svg[data-icon="arrow-right"] {
+  transform: translateX(3px);
+}
+/* One coral action per view. */
+.mist-btn--primary {
+  --btn-bg: var(--mist-coral);
+  --btn-fg: var(--mist-midnight);
+  --btn-border: var(--mist-coral);
+}
+.mist-btn--primary:hover {
+  --btn-bg: var(--mist-fog);
+  --btn-border: var(--mist-fog);
+}
+.mist-btn--secondary:hover {
+  --btn-border: var(--mist-fg);
+  --btn-bg: color-mix(in srgb, var(--mist-fg) 8%, transparent);
+}
+
+/* ---------------------------------------------------------------- Hero */
+/* A midnight field in both themes, full bleed, with the record beside the
+   copy. Starlight puts the hero inside the content panel, so the field is
+   a pseudo-element that extends past it. */
+
+.mist-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 2.5rem;
+  align-items: center;
+  margin-top: -1.5rem;
+  padding-block: clamp(3rem, 2.2rem + 3.3vw, 5.5rem);
+  color: var(--mist-fg);
+}
+.mist-hero::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 -100vw;
+  background: var(--mist-midnight);
+  border-bottom: 1px solid var(--mist-line);
+}
+.mist-hero__copy {
+  display: grid;
+  gap: 1.5rem;
+  justify-items: start;
+}
+.mist-hero h1 {
+  max-width: 14ch;
+  margin: 0;
+  font-family: var(--mist-font-display);
+  font-size: clamp(2.5rem, 1.75rem + 3.1vw, 4.5rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--mist-fg);
+}
+.mist-hero__tagline {
+  max-width: 40ch;
+  margin: 0;
+  font-size: var(--mist-t-lede);
+  line-height: 1.5;
+  color: var(--mist-fg-2);
+}
+.mist-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+@media (min-width: 50rem) {
+  .mist-hero {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 4rem;
+  }
+}
+
+/* -------------------------------------------------------- Ruled index */
+
+.mist-index {
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--mist-line-strong);
+}
+.mist-index li {
+  margin: 0;
+  border-bottom: 1px solid var(--mist-line);
+}
+.mist-index a {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1.5rem;
+  align-items: center;
+  padding: 1.25rem 0;
+  color: var(--mist-fg);
+  text-decoration: none;
+}
+.mist-index__title {
+  font-family: var(--mist-font-display);
+  font-size: var(--mist-t-h3);
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+}
+.mist-index__body {
+  grid-column: 1;
+  max-width: 60ch;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--mist-fg-2);
+}
+.mist-index svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  transition: transform 320ms var(--mist-ease);
+}
+.mist-index a:hover svg {
+  transform: translateX(3px);
+}
+.mist-index a:hover .mist-index__title {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: var(--mist-marker);
+}

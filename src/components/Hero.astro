@@ -1,0 +1,34 @@
+---
+// Replaces Starlight's hero: left-aligned copy on a midnight field beside the
+// record, with one coral action. Reads the same `hero` frontmatter.
+import Icon from "./Icon.astro";
+import RecordField from "./RecordField.astro";
+
+const { title = Astro.locals.starlightRoute.entry.data.title, tagline, actions = [] } =
+  Astro.locals.starlightRoute.entry.data.hero ?? {};
+---
+
+<div class="mist-hero mist-dark">
+  <div class="mist-hero__copy">
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="mist-hero__tagline" set:html={tagline} />}
+    {
+      actions.length > 0 && (
+        <div class="mist-hero__actions">
+          {actions.map((a) => (
+            <a
+              href={a.link}
+              class:list={["mist-btn", a.variant === "primary" ? "mist-btn--primary" : "mist-btn--secondary"]}
+            >
+              <span>{a.text}</span>
+              <Icon name="arrow-right" size={18} />
+            </a>
+          ))}
+        </div>
+      )
+    }
+  </div>
+  <div class="mist-hero__field">
+    <RecordField />
+  </div>
+</div>

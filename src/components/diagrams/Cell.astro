@@ -1,0 +1,14 @@
+---
+// One note: a square cell. States follow DESIGN.md's diagram grammar.
+//   empty     hairline outline
+//   recorded  faint fill, strong border
+//   followed  coral fill (the payment being followed; one per figure)
+//   hidden    a solid redaction bar
+//   shared    coral outline
+interface Props {
+  state?: "empty" | "recorded" | "followed" | "hidden" | "shared";
+}
+const { state = "recorded" } = Astro.props;
+---
+
+<span class="mist-cell" data-state={state} aria-hidden="true"></span>

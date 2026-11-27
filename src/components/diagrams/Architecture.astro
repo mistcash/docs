@@ -1,0 +1,46 @@
+---
+// The architecture in one drawing: spend proofs go to one Chamber, which holds
+// the shared record and no assets. Reserves hold the assets, each under its
+// own rules. The example Reserves are the spec's example deployment.
+import Figure from "./Figure.astro";
+import Cell from "./Cell.astro";
+import Reserve from "./Reserve.astro";
+
+const record = [
+  "1101110101110",
+  "0111011010111",
+  "1011101110101",
+].flatMap((r) => [...r].map((c) => (c === "1" ? "recorded" : "empty") as "recorded" | "empty"));
+---
+
+<Figure
+  label="A spend proof, made on the user's device, goes to the Chamber. The Chamber holds the shared record of notes, the spent markers and the list of Reserves, and holds no assets. Below it, three Reserves each hold their own funds under their own rules."
+  caption="Reserves stand for different rule sets. The three shown follow the spec's example deployment."
+>
+  <div class="mist-arch">
+    <div class="mist-arch__proof">
+      <Cell state="followed" />
+      <span class="mist-lane" aria-hidden="true"></span>
+      <p class="mist-label">Spend proof, made on the user's device</p>
+    </div>
+
+    <div class="mist-record">
+      <p class="mist-label">Chamber · one per network · holds no assets</p>
+      <div class="mist-cells">
+        {record.map((state) => <Cell state={state} />)}
+      </div>
+      <ul class="mist-record__parts">
+        <li class="mist-chip">Transactions tree</li>
+        <li class="mist-chip">Nullifiers</li>
+        <li class="mist-chip">zkState tree</li>
+        <li class="mist-chip">ChamberVerifier</li>
+      </ul>
+    </div>
+
+    <div class="mist-arch__reserves">
+      <Reserve name="Reserve A" rules={["KYC members"]} />
+      <Reserve name="Reserve B" rules={["AML screened"]} />
+      <Reserve name="Reserve C" rules={["No extra rules"]} />
+    </div>
+  </div>
+</Figure>
