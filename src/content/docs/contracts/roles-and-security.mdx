@@ -62,12 +62,12 @@ These are the trust assumptions, stated plainly.
 | Holder | Worst case if acting against users |
 | --- | --- |
 | Chamber owner | Proposes a verifier that accepts any proof. After 7 days it could authorise the withdrawal of every asset in every Reserve, because no on-chain ledger checks withdrawals against notes. The defence is the published code hash and the 7-day window to exit. The owner can also make itself guardian with `setGuardian` at once |
-| Guardian | Pauses deposits with no time limit. Replacing the guardian does not end the pause: the owner first rotates the guardian with `setGuardian`, then calls `unpauseInflows`. Halts all spends, withdrawals included, for up to 3 days, then must wait 7 days after that pause ends before the next |
+| Guardian | Pauses deposits with no time limit. The owner can call `unpauseInflows` itself, but a hostile guardian can pause again at once, so the owner replaces the guardian with `setGuardian` before unpausing. Replacing the guardian alone does not end the pause. Halts all spends, withdrawals included, for up to 3 days, then must wait 7 days after that pause ends before the next |
 | Whoever ran the trusted setup | Could forge a proof for any public inputs, including a withdrawal, if they kept the setup's secret randomness. The keys come from a single-party setup. See [Circuits](/circuits/) |
 | Reserve admin or `USERS` | Decides who can spend at a Reserve with members. Any single `USERS` holder, a hot signing key included, can remove a member, which leaves that member's notes there unspendable until they are registered again. Never registering a holder does the same. An exit spend for that case is **Planned**, and core's operations notes say not to deploy to production, or not to let any Reserve remove users, until it lands |
 | `METADATA` | Each update replaces the shared zkState root. Proofs against the old root stay valid for 10 minutes |
 | `ASSETS` | Listing an asset that charges outgoing fees, rebases downward, blocklists the Reserve or is upgradeable can leave notes that claim more than the Reserve holds |
-| Screener | Keeps deposits out of the tree. Cannot take them: the depositor reclaims |
+| Screener | Keeps deposits out of the tree. Cannot take them: a pending deposit returns to its depositor, and a rejected one to the `refundTo` the depositor chose |
 
 Further limits that hold for every user:
 

@@ -48,7 +48,7 @@ function hasPermission(bytes32 role, address account) public view returns (bool)
 Each role is held by any number of accounts. `hasPermission` is true for the admin on every role, and for any account with an explicit grant. The admin's implicit permissions cannot be revoked. An unknown role reverts with `Reserve: unknown permission`.
 
 - **No-ops are silent.** Granting a role the account already holds, or revoking one it holds no explicit grant for, changes nothing and emits nothing. A grant to the zero address reverts with `Reserve: zero account`.
-- **Permission epoch.** `permissionEpoch(role, account)` moves each time the account loses the role: when its explicit grant is revoked, and, for each role it holds no explicit grant for, when it hands the admin role on. The registrar binds a signer's `USERS` epoch into every signature, so re-granting an account never revives the signatures it made before it lost the role.
+- **Permission epoch.** `permissionEpoch(role, account)` moves when the account's explicit grant of the role is revoked, and, for each role it holds no explicit grant for, when it hands the admin role on. Either way, the account's signatures made before stop counting. The registrar binds a signer's `USERS` epoch into every signature, so re-granting an account never revives the signatures it made before it lost the role.
 
 | Role | `bytes32` value | Functions |
 | --- | --- | --- |
@@ -93,7 +93,7 @@ A user removed from a Reserve with members cannot spend or withdraw there until 
 | `registeredUserProof(index)` | The 30-element membership proof for the leaf at `index` |
 | `isRegisteredUser(leaf)` | Whether the leaf is currently in the tree |
 | `leafNonce(leaf)` | A counter that moves on every registration and removal of the leaf |
-| `permissionEpoch(role, account)` | A counter that moves each time the account loses the role |
+| `permissionEpoch(role, account)` | A counter that moves when the account's explicit grant is revoked, or when it hands the admin role on without one |
 
 ## Auditor key
 

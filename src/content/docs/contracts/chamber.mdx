@@ -81,7 +81,7 @@ function depositRefundTo(uint256 depositId) public view returns (address);
 
 - **The screener is read at decision time.** A batch reverts with `Chamber: only reserve screener` if the caller is not the current screener of a pending deposit in it. A new screener therefore decides every deposit still waiting. With no screener set, waiting deposits can only be reclaimed.
 - **The queue is keyed by deposit id,** not by note hash. A note hash is public in the deposit calldata, so a hash-keyed queue would let anyone block a deposit by queueing the same note first. Duplicate notes may queue side by side, and approval admits only the first.
-- **A screener cannot take funds.** It can keep a note out of the tree, but the depositor can always reclaim.
+- **A screener cannot take funds.** It can keep a note out of the tree, but a pending deposit always returns to its depositor, and a rejected one to the `refundTo` the depositor chose.
 - `pendingDeposits(id)` returns `(depositor, status, reserve, asset, amount, noteHash)`, with status `None`, `Pending` or `Rejected`. Approval and reclaim clear the record, so `None` also covers settled and unknown ids.
 
 ## Spends

@@ -37,7 +37,7 @@ The registrar uses EIP-712:
 | `leafNonce` | `Reserve(reserve).leafNonce(leaf)` | The leaf is registered or removed |
 | `revocations` | `revocations(reserve, leaf)` on the registrar | A `USERS` holder calls `revoke(reserve, leaf)` |
 | `signer` | The account that signed | Never |
-| `signerEpoch` | `Reserve(reserve).permissionEpoch(USERS, signer)` | The signer loses `USERS` |
+| `signerEpoch` | `Reserve(reserve).permissionEpoch(USERS, signer)` | The signer's explicit `USERS` grant is revoked, or it hands the admin role on without one |
 | `deadline` | The last valid timestamp, inclusive | Never |
 
 `userKeyExchange` stays off-chain and must be a full-entropy key-exchange output, or the leaf can be brute-forced.
@@ -122,7 +122,7 @@ Whoever holds a signature chooses when, before the deadline, the registration la
 | The registration lands | `leafNonce` moves, so the signature cannot register the leaf twice |
 | The member is removed | `leafNonce` moves, so no signature made before the removal can put the member back. Re-registering needs a new signature |
 | A `USERS` holder calls `revoke(reserve, leaf)` | `revocations` moves, cancelling every outstanding signature for the leaf, from every signer, with any deadline. Signatures made afterwards work |
-| The signer loses `USERS` | `signerEpoch` moves, on a revoke of its grant or when it hands the admin role on. Granting the role again does not revive its old signatures |
+| The signer's `USERS` grant is revoked, or it hands the admin role on without one | `signerEpoch` moves. Granting the role again does not revive its old signatures |
 | The deadline passes | The call reverts with `Registrar: signature expired` |
 
 ## Signatures

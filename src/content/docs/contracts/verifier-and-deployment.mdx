@@ -71,7 +71,7 @@ The script then broadcasts, in order:
 2. `new Chamber(initialOwner, verifier, GUARDIAN)`. `initialOwner` is `CHAMBER_OWNER`, unless `DEV_FIXTURES` is set or no owner is named, in which case it is the deployer.
 3. `new ManagerSigRegistrar()`.
 4. With `DEV_FIXTURES`: a mock ERC-20, `registerReserve(deployer, 789, 987)`, `setAssetMinDeposit(asset, 1)`, a `USERS` grant to the registrar, and a registration of `H2(deployer, USER_KEY_EXCHANGE)` signed by the deployer with a deadline one hour out.
-5. `chamber.transferOwnership(CHAMBER_OWNER)`, only if an owner is named and the deployer holds the Chamber, which happens with `DEV_FIXTURES`. The owner calls `acceptOwnership()` after the 7-day delay.
+5. `chamber.transferOwnership(CHAMBER_OWNER)`, only if `CHAMBER_OWNER` is named and differs from `initialOwner`. That happens with `DEV_FIXTURES` and an owner other than the deployer. The owner calls `acceptOwnership()` after the 7-day delay.
 
 Outside the development chains the Chamber is therefore built owned by its Safe, with its guardian in place, and the deployer key never holds a power over it. It writes the address book to `deployments/<chainId>.json`, with the Chamber, verifier, registrar, development Reserve and mock asset addresses. These pages list no deployed addresses.
 
@@ -83,7 +83,7 @@ The development Reserve has a fixed auditor key (789, 987), a mock asset, no scr
 
 ## After deployment
 
-1. **Ownership.** With development fixtures and a named owner, the owner calls `acceptOwnership()` after 7 days. Otherwise the Chamber already has its final owner.
+1. **Ownership.** If the script queued a transfer, the owner calls `acceptOwnership()` after 7 days. Otherwise the Chamber already has its final owner.
 2. **Guardian.** If none was named at construction, the owner calls `setGuardian`.
 3. **Reserves.** The owner calls `registerReserve(admin, keyHash, keyInputPoint)` for each Reserve, naming a Safe as admin.
 4. **Screener first.** The Reserve admin, or a `SCREENING` holder, calls `setScreener` before any asset is listed.
