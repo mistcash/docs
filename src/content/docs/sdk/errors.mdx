@@ -1,0 +1,108 @@
+---
+title: Errors and pause states
+description: "Each refusal and revert message the SDK and the contracts produce, what causes it and what clears it."
+sidebar:
+  order: 10
+---
+
+The client refuses a call before it sends anything wherever the Chamber would reject it, so a failure costs no gas. The messages below are exact. The contract reverts reach the host through its chain adapter.
+
+## Pause states
+
+The guardian pauses two things separately. `inflowsPaused` stops `deposit` and `approveDeposits` until the guardian or owner unpauses. Spends pause for at most 3 days, and the next spend pause starts no sooner than 7 days after the last one ended. The client reads both flags.
+
+| State | What the client does | What stays available |
+| --- | --- | --- |
+| Inflows paused | `deposit` throws `Deposits are paused.` before the approve is sent | `reclaimDeposit` and `rejectDeposits` |
+| Spends paused | `spend` throws `Spends are paused.` before proving | `reclaimDeposit`, deposits and screening |
+
+`approveDeposits` has no client-side check. Sent during a pause, it reverts with `Chamber: inflows paused`.
+
+## Deposits
+
+- `Enter a whole amount above zero.`  
+  Amount is zero or less. Pass an amount above zero.
+- `Deposits are paused.`  
+  Inflows paused. Wait for the guardian to unpause.
+- `This reserve does not accept this token.`  
+  Asset not listed. An `ASSETS` holder lists it with `setAssetMinDeposit`.
+- `The minimum deposit at this reserve is N.`  
+  Below the minimum. Deposit at least N.
+- `MistClient: deposit() needs sendTransaction to return receipt.logs (or the call result); nothing was deposited`  
+  Adapter returns no logs. Return `receipt.logs`. Raised after the approve and before the deposit.
+- `MistClient: deposit sent, but its receipt has no NoteAppended or DepositQueued log and no (noteHash, depositId) result: return receipt.logs from sendTransaction`  
+  Receipt has no deposit event. Return the logs. The deposit is already on-chain.
+- `MistClient: the deposit's receipt holds several Chamber notes: return the call's (noteHash, depositId) result to pick this one`  
+  Receipt holds several notes. Return `result` from `sendTransaction`.
+- `MistClient: queuedDeposits needs ChainAdapter.getEvents`  
+  Queue read without events. Provide `getEvents`.
+
+## Spends
+
+- `withdrawTo is required for withdrawals`  
+  Withdrawal without recipient. Pass `withdrawTo`.
+- ``No reserve: pass `reserve` explicitly or deposit first.``  
+  No Reserve known. Pass `reserve`.
+- `Reserve is members only: join it first.`  
+  Members-only Reserve. Call `join`.
+- `Your notes here hold N.`  
+  Notes too small. Deposit more, or lower the amount.
+- `A spend takes at most two notes from one tx tree and no two of yours cover this. Send some to yourself to merge them.`  
+  No two notes cover it. Merge notes, or split the payment.
+- `MistClient: read X of the reserve's Y user leaves: ChainAdapter.getEvents must serve every UserRegistered and UserRemoved`  
+  Missing user leaves. Serve every event of the Reserve.
+- `This reserve no longer lists you as a member: join it again.`  
+  Member removed. Call `join` with a new signature.
+- `The reserve state changed while proving: spend again.`  
+  Root went stale. Call `spend` again. Nothing was submitted.
+- `All 256 key indices used for this ukx`  
+  Key indices used up. Join again for a new key exchange.
+- `In.Amount N out of uint64 range`, and the same for `Out.Amount` and `Withdraw`  
+  Amount over uint64. Split across notes.
+- The prover's own error, or `Prover rejected the spend`
+  Prover rejects. Read the message.
+
+## Joining and configuration
+
+- `Client and manager derived different ukx values`  
+  Key exchanges differ. The key holder must derive from the same `cipherText`, Reserve and MIST Address.
+- `MistClient: secretOf not configured`  
+  No secret lookup. Pass `secretOf`.
+- `MistClient: addressOf not configured`  
+  No address lookup. Pass `addressOf`.
+- `MistClient: send of <function> vetoed by onBeforeSend`  
+  Send vetoed. The hook returned `false`.
+- `Prover predates decrypt: rebuild mist.wasm.`  
+  Prover cannot decrypt. Use a current wasm.
+- `MistClient: UserRegistered events are missing for reserve <address>`  
+  Missing registration. Serve every `UserRegistered` event.
+- `prover worker terminated`  
+  Worker stopped. Create a new worker prover.
+
+## Contract reverts
+
+| Revert | Cause |
+| --- | --- |
+| `Registrar: signature expired` | The chain time passed the signature's `deadline` |
+| `Registrar: invalid signature` | The signature does not match the digest, or a value it binds moved |
+| `Registrar: missing users permission` | The signer, or the caller of `revoke`, holds no `USERS` |
+| `Reserve: missing permission` | The caller lacks the permission, such as the registrar without `USERS` |
+| `Reserve: only admin` | A grant, revoke or handover from a non-admin |
+| `Reserve: only pending admin` | `acceptAdmin` from an account that was not nominated |
+| `Reserve: zero account` | `grantPermission` for the zero address |
+| `Reserve: user already registered` | The leaf is already in the users tree |
+| `Reserve: no user at index` | `removeUser` for an index with no member |
+| `Reserve: last user` | `removeUser` would empty the users tree |
+| `Chamber: asset not allowed` | The asset is not listed at the Reserve |
+| `Chamber: deposit below minimum` | The Reserve received less than its minimum |
+| `Chamber: spends paused`, `Chamber: inflows paused` | A pause is active |
+| `Chamber: not pending` | `setDepositRefundTo` on a deposit that is not pending |
+| `Chamber: only depositor` | A pending deposit reclaimed or re-addressed by someone else |
+| `Chamber: only depositor or refundTo` | A rejected deposit reclaimed by someone else |
+| `Chamber: zero refundTo` | A zero `refundTo` |
+| `Chamber: no queued deposit` | `reclaimDeposit` for an id that is settled or unknown |
+| `invalid merkle proof` | The proof's transaction root is not one the Chamber produced |
+| `invalid state root` | The proof's zkState root is neither current nor within the 10-minute grace |
+| `only owner caller` | A wallet-owned spend submitted by an account other than the owner |
+| `transaction is spent` | A nullifier was already used |
+| `private tx key used` | The key index was already used for this key exchange |
