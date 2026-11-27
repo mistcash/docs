@@ -34,7 +34,7 @@ function acceptAdmin() external;
 
 The admin is named by the Chamber owner in `registerReserve` and cannot be zero. It holds every permission, grants and revokes them, and is the only account that moves the admin role. A live Reserve's admin should be a Safe.
 
-- **Two steps.** `transferAdmin(newAdmin)` nominates, and emits `AdminTransferStarted`. The nominee calls `acceptAdmin()`, and the Reserve emits `AdminTransferred`. Nominating zero cancels. There is no delay.
+- **Two steps.** `transferAdmin(newAdmin)` nominates, and emits `AdminTransferStarted`. The nominee calls `acceptAdmin()`, and the Reserve emits `AdminTransferred`. Nominating zero cancels. There is no delay. The previous admin loses its implicit permissions, and its permission epoch moves for every role it holds no explicit grant for.
 - **Grants survive a handover.** Explicit grants are not cleared. The new admin reviews the Reserve's `PermissionGranted` and `PermissionRevoked` events and revokes stale grants, including any held by the previous admin's address. Registrars and bots keep working through a handover.
 
 ## Permissions
@@ -46,6 +46,9 @@ function hasPermission(bytes32 role, address account) public view returns (bool)
 ```
 
 Each role is held by any number of accounts. `hasPermission` is true for the admin on every role, and for any account with an explicit grant. The admin's implicit permissions cannot be revoked. An unknown role reverts with `Reserve: unknown permission`.
+
+- **No-ops are silent.** Granting a role the account already holds, or revoking one it holds no explicit grant for, changes nothing and emits nothing. A grant to the zero address reverts with `Reserve: zero account`.
+- **Permission epoch.** `permissionEpoch(role, account)` moves each time the account loses the role: when its explicit grant is revoked, and, for each role it holds no explicit grant for, when it hands the admin role on. The registrar binds a signer's `USERS` epoch into every signature, so re-granting an account never revives the signatures it made before it lost the role.
 
 | Role | `bytes32` value | Functions |
 | --- | --- | --- |
@@ -74,12 +77,14 @@ function removeUser(uint256 index) external onlyPermission(USERS);
 
 A member's leaf is `H2(owner, userKeyExchange)`, computed off-chain. Only the hash goes on-chain. The tree holds 4^10 = 1,048,576 leaf slots. Removals do not free slots, so every registration, including a re-registration, uses one, and `addUser` reverts with `merkle tree capacity exceeded` once all are used.
 
-- **`addUser`** requires a non-zero leaf below the field order that is not currently registered. It appends the leaf, increments `registrations(leaf)`, emits `UserRegistered(leaf, index, root)` and pushes the new root with `Chamber.setReserveStateRoot`.
-- **`removeUser`** takes the index from `UserRegistered`. It zeroes the leaf, clears `isRegisteredUser(leaf)`, emits `UserRemoved(index, leaf, root)` and pushes the new root. It reverts with `Reserve: no user at index` for an index past the last leaf or an already-zero leaf, and with `Reserve: last user` if the users root would become zero. A zero users root would switch messaging off.
-- **Re-registration.** A removed leaf can be added again, at a new index. `registrations(leaf)` counts every registration, and the registrar binds its signatures to that count, so no signature collected before the latest registration can be used again.
+- **`addUser`** requires a non-zero leaf below the field order that is not currently registered. It appends the leaf, increments `leafNonce(leaf)`, emits `UserRegistered(leaf, index, root)` and pushes the new root with `Chamber.setReserveStateRoot`.
+- **`removeUser`** takes the index from `UserRegistered`. It zeroes the leaf, clears `isRegisteredUser(leaf)`, increments `leafNonce(leaf)`, emits `UserRemoved(index, leaf, root)` and pushes the new root. It reverts with `Reserve: no user at index` for an index past the last leaf or an already-zero leaf, and with `Reserve: last user` if the users root would become zero. A zero users root would switch messaging off, and the Chamber also refuses one. To remove a Reserve's only user, add another leaf first.
+- **Re-registration.** A removed leaf can be added again, at a new index. `leafNonce(leaf)` moves on every registration and every removal, and the registrar binds its signatures to it, so no signature collected before a removal can put the user back. Re-registering needs a new signature.
 - **Lag.** A removal takes full effect within 10 minutes, when the last zkState root that holds the leaf leaves the Chamber's grace window.
 
-A user removed from a Reserve with members cannot spend or withdraw there while removed. An exit spend that lets any owner withdraw in public is **Planned**.
+:::caution[A removal freezes the user's notes]
+A user removed from a Reserve with members cannot spend or withdraw there until a `USERS` holder registers them again, and any single `USERS` holder can make the removal. An exit spend that lets any owner withdraw in public is **Planned**. Core's operations notes say not to deploy these contracts to production, or not to let any Reserve remove users, until that exit spend is in the circuit and the verifier.
+:::
 
 | View | Returns |
 | --- | --- |
@@ -87,7 +92,8 @@ A user removed from a Reserve with members cannot spend or withdraw there while 
 | `registeredUsersCount()` | Leaf slots used, removed users included. A removed slot is never reused |
 | `registeredUserProof(index)` | The 30-element membership proof for the leaf at `index` |
 | `isRegisteredUser(leaf)` | Whether the leaf is currently in the tree |
-| `registrations(leaf)` | How many times the leaf has been registered |
+| `leafNonce(leaf)` | A counter that moves on every registration and removal of the leaf |
+| `permissionEpoch(role, account)` | A counter that moves each time the account loses the role |
 
 ## Auditor key
 
