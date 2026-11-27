@@ -22,6 +22,8 @@ The release that follows `0.6.0-beta.1` targets core `fa7b92d`. The prover's req
 | 9 | The contents of `CORE_ABI` and `SCREENING_ABI` changed. `SCREENING_ABI` gains `setDepositRefundTo` and `DepositRefundToSet`, and `DepositQueued` carries `refundTo` | Rebuild any `parseAbi(CORE_ABI)` and event decoding from the new exports |
 | 10 | Reclaiming a pending deposit is the depositor's alone and refunds the depositor. `refundTo` is paid only after a rejection | Update any flow that reclaimed a pending deposit as `refundTo` |
 | 11 | `revokeRegistration(reserve, leaf)` takes no deadline and voids every signature for the leaf | Drop the deadline argument |
+| 12 | `TxReceipt.status` is narrowed to `success` or `reverted`. A `reverted` receipt makes the call throw `MistClient: <function> reverted (<hash>)` before `onTx` and before any local state changes | Return viem's status as it is, or leave `status` out and throw on a revert in the adapter |
+| 13 | `spend` refuses a positive `amount` without `to` before proving | Pass `to`, or `amount: 0n` with `withdraw` for a withdrawal |
 
 New in this release: `grantPermission`, `revokePermission`, `transferAdmin`, `acceptAdmin`, `hasPermission`, `setAssetMinDeposit`, `removeUser`, `revokeRegistration`, `setDepositRefundTo`, `txTreeLeaves`, `registeredUserLeaves`, `RESERVE_ROLES` and `ManagerApproval`. `Note` gains `txIndex`, `DepositOpts` gains `refundTo`, `pick` takes a third argument `txTreeCapacity`, and `plan` takes `txTreeCapacity` and returns `txTree`.
 

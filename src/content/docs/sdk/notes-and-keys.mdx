@@ -65,8 +65,8 @@ A key holder's client reads the same map. `openPayload` tries each `ukx` entry o
 Each member spend carries a key index from 0 to 255, and the Chamber files the spend under a private transaction key derived from the key exchange and that index. The Chamber rejects a key it has seen, so an index is used once per key exchange.
 
 - `spend` draws an index at random from those not yet used for the key exchange. The indices live in `client.usedKeyIndices`.
-- A key exchange allows 256 member spends. After that the draw throws `All 256 key indices used for this ukx`, and the member joins again to get a fresh key exchange.
-- A spend by a non-member at a Reserve without members uses no recorded index.
+- A key exchange covers 256 spends that publish commitments, which is every spend at a Reserve with members. After that the draw throws `All 256 key indices used for this ukx`. The member joins the Reserve again for a fresh key exchange, which means a new leaf and a new Reserve signature.
+- A spend at a Reserve without members uses no recorded index.
 - Used indices persist through the `store`, under `mist:keyIndices`. The client merges into the stored map and never overwrites it, so two clients sharing one store do not erase each other's indices.
 
 Call `restoreKeyIndices()` once at startup when a `store` is passed. `spend` also re-reads the store before it draws. Without the startup call, a reload begins with an empty set and can draw an index already spent, and the Chamber reverts the spend.

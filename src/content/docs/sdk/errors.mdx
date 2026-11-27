@@ -39,6 +39,8 @@ The guardian pauses two things separately. `inflowsPaused` stops `deposit` and `
 
 ## Spends
 
+- `to is required to send an amount: a note with no owner can never be spent`  
+  Amount without a recipient. Pass `to`, or use `amount: 0n` for a withdrawal.
 - `withdrawTo is required for withdrawals`  
   Withdrawal without recipient. Pass `withdrawTo`.
 - ``No reserve: pass `reserve` explicitly or deposit first.``  
@@ -70,6 +72,8 @@ The guardian pauses two things separately. `inflowsPaused` stops `deposit` and `
   No secret lookup. Pass `secretOf`.
 - `MistClient: addressOf not configured`  
   No address lookup. Pass `addressOf`.
+- `MistClient: <function> reverted (<hash>)`  
+  The transaction was mined and reverted. Read the contract revert below. No local state changed.
 - `MistClient: send of <function> vetoed by onBeforeSend`  
   Send vetoed. The hook returned `false`.
 - `Prover predates decrypt: rebuild mist.wasm.`  

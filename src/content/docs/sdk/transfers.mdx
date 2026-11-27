@@ -28,7 +28,7 @@ await client.spend({ id: "alice (MIST)", amount: 0n, withdraw: amount, withdrawT
 | Option | Meaning |
 | --- | --- |
 | `id` | The spending identity |
-| `amount` | The value sent to `to`. Pass `0n` for a withdrawal, since a non-zero `amount` is a payment and needs `to` |
+| `amount` | The value sent to `to`. Pass `0n` for a withdrawal. A non-zero `amount` without `to` is refused before proving, since that output would have no owner and could never be spent |
 | `to` | The recipient identity. Unset for a withdrawal |
 | `withdraw`, `withdrawTo` | A public payout and the account name that receives it. `withdrawTo` is required when `withdraw` is above zero |
 | `reserve` | The Reserve to spend at. Defaults to the Reserve of the first unspent note |
