@@ -62,19 +62,20 @@ The circuit does no elliptic-curve operations, and no MIST protocol key lives on
 
 | Role | Powers | Limits |
 | --- | --- | --- |
-| Chamber owner | Registers every Reserve and names its admin. Proposes a new verifier, which goes live after 7 days and only if its code is unchanged, and can cancel it. Sets the guardian. Moves ownership in two steps behind a 7-day timelock | Cannot swap the verifier instantly, and cannot renounce ownership. A verifier that accepts anything would authorise the withdrawal of everything held, so the owner should be a multisig |
+| Chamber owner | Registers every Reserve and names its admin. Proposes a new verifier, which goes live after 7 days and only if its code is unchanged, and can cancel it. Sets or replaces the guardian, which can also be named at construction. Moves ownership in two steps behind a 7-day timelock | Cannot swap the verifier instantly, and cannot renounce ownership. A verifier that accepts anything would authorise the withdrawal of everything held, so the owner should be a multisig |
 | Guardian | Pauses `deposit` and `approveDeposits` until unpaused. Pauses spends for at most 3 days, with 7 days between pauses. The owner can also unpause | Cannot stop `reclaimDeposit` or `rejectDeposits`. A spend pause ends on its own and cannot be chained |
-| Reserve admin | Named by the Chamber owner. Holds every permission, grants and revokes them, and hands the role to a new admin in two steps | Cannot move funds. Grants survive a handover until the new admin revokes them |
+| Reserve admin | Named by the Chamber owner. Holds every permission, grants and revokes them, and hands the role to a new admin in two steps | Cannot move funds. Grants survive a handover until the new admin revokes them. The previous admin loses its implicit permissions at the handover |
 | Permission holders | `ASSETS`: list and delist assets and set minimum deposits. `USERS`: add and remove registered users. `METADATA`: update the Reserve's auditor key. `SCREENING`: set the deposit screener | Each permission covers only its own action. None can move funds |
-| Registrar | A contract or account holding `USERS`. `ManagerSigRegistrar` registers a user when a `USERS` holder signed it | A signature carries a deadline and binds the leaf's registration count. Any `USERS` holder can revoke one |
-| Deposit screener | Set by a `SCREENING` holder. Decides which deposits enter a transactions tree | Cannot move funds. The depositor, or the refund address the deposit named, can reclaim a pending or rejected deposit |
+| Registrar | A contract or account holding `USERS`. `ManagerSigRegistrar` registers a user when a `USERS` holder signed it | A signature carries a deadline and binds the signer, the signer's permission epoch and the leaf's nonce. A removal or the signer losing `USERS` voids it. Any `USERS` holder can revoke every outstanding signature for a leaf |
+| Deposit screener | Set by a `SCREENING` holder. Decides which deposits enter a transactions tree | Cannot move funds. The depositor can reclaim a pending deposit. A rejected one is refunded to the address the deposit named |
 | Relayer | Not a role. Anyone can submit an `auth_done = 1` spend | Cannot change it |
 
 ## Known limits
 
 - **One zkState root for every Reserve.** A registration, removal or metadata update at any Reserve replaces it. The previous root stays valid for 10 minutes, so a proof in flight survives a change inside that window. The first registration at a Reserve switches messaging on there and retires every older root at once, because older roots have no users root for it.
 - **Removal takes effect after the window.** A removed user stays provable until the last root that holds their leaf expires, at most 10 minutes.
-- **Inputs from one tree.** A spend proves both inputs against one transactions root, so it cannot combine notes from different trees.
+- **A removal freezes the removed user's notes.** At a Reserve with members, only members can spend. A removed user's notes there stay unspendable until a `USERS` holder registers the user again. Any single `USERS` holder can make that removal. The exit spend that would let any owner withdraw in public is **Planned**, and core's operations notes say not to deploy to production, or not to let any Reserve remove users, until it lands.
+- **Inputs from one tree.** A spend proves both inputs against one transactions root, so it cannot combine notes from different trees. To merge them, the owner first spends one note with a dummy second input, which lands its outputs in the current tree.
 - **No solvency ledger.** The circuit's conservation rule and each Reserve's own balance bound what can leave. A Reserve's admin must list only plain assets: never rebasing, fee-on-transfer, blocklisting or upgradeable ones.
 
 The [specification](https://github.com/mistcash/mist/tree/main/spec) is the document of record, and its implementation status file tracks each limit.
