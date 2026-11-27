@@ -1,0 +1,116 @@
+---
+title: Install and setup
+description: "Installing @mistcash/sdk, its package exports, the Node and browser prover entry points, the wasm assets and circuit.json."
+sidebar:
+  order: 1
+---
+
+`@mistcash/sdk` installs from npm with `viem` as a peer dependency. Node runs it with no configuration. A browser app passes the prover's WebAssembly file to the loader explicitly.
+
+```bash
+npm install @mistcash/sdk@beta viem
+```
+
+Version 0.6 is a rewrite and ships on the `beta` tag. The `latest` tag is the legacy 0.5 SDK, which has a different API. The package needs Node `^20.19.0` or `>=22.12.0` and `viem` `^2`.
+
+## Package exports
+
+| Import | Contents |
+| --- | --- |
+| `@mistcash/sdk` | `MistClient`, the types, the ABIs and the note, proving, identity and key-exchange helpers. ESM and CommonJS. Loads no WebAssembly |
+| `@mistcash/sdk/prover` | `loadProver` and `createWorkerProver`. The `node` build reads the wasm from disk, the default build fetches it |
+| `@mistcash/sdk/prover/webgpu` | `loadWebGPUProver` and `hasWebGPU`, for browsers |
+| `@mistcash/sdk/mist.wasm` | The CPU prover with its proving key embedded. Also served as `@mistcash/sdk/wasm/mist.wasm` |
+| `@mistcash/sdk/mist-webgpu.wasm` | The WebGPU build of the same prover. Also served as `@mistcash/sdk/wasm/mist-webgpu.wasm` |
+| `@mistcash/sdk/circuit.json` | The record of what the wasm was built from |
+
+The root entry exports these groups.
+
+| Group | Exports |
+| --- | --- |
+| Client | `MistClient`, `MistClientOpts`, `DepositOpts`, `SpendOpts`, `ManagerApproval` |
+| Contracts | `CORE_ABI`, `SCREENING_ABI`, `ABIS`, `PUBLIC_INPUTS`, `RESERVE_ROLES`, `ReserveRole`, `AddressBook` |
+| Identity | `secretOf`, `ownerOf`, `rand`, `account`, `isMist`, `nameOf`, `OWNER_KEYWORD` |
+| Key exchange | `managerKeys`, `encapsulate`, `decapsulate`, `deriveUkx`, `fingerprint`, `SIZES` |
+| Notes | `unspent`, `total`, `pick`, `plan` |
+| Proving | `buildSpendRequest`, `serializeSpendRequest`, `proveSpend`, `foldCiphertext`, `randomKeyIndex`, `pickUnusedKeyIndex`, `ProverAdapter` |
+| Types | `Hex`, `Note`, `PendingDeposit`, `DepositStatus`, `ChainAdapter`, `SentTx`, `TxReceipt`, `MistCallbacks`, `StorageAdapter` |
+
+`ABIS` holds the ABI of each of the five contracts as human-readable signatures. `CORE_ABI` is the subset a host's chain adapter needs, with the deposit-screening functions included.
+
+## Prover entry points
+
+`loadProver` returns a `FullProverAdapter`: `{ hash2, hash3, spend, decrypt }`. Its source argument is one of four things.
+
+| Source | Call | Use when |
+| --- | --- | --- |
+| Nothing | `loadProver()` | Node, and browsers where the package's file layout is served as it is |
+| A path | `loadProver("/abs/path/mist.wasm")` | Node, with a custom build output |
+| A URL | `loadProver(url)` | Browsers, with the URL the bundler emits |
+| Bytes | `loadProver(bytes)` | Anywhere, including bytes read from OPFS or IndexedDB |
+
+```ts
+import { loadProver } from "@mistcash/sdk/prover";
+
+const prover = await loadProver();
+console.log(await prover.hash2("1", "2"));
+```
+
+The default source resolves `new URL("../wasm/mist.wasm", import.meta.url)` at runtime. A bundler cannot see that string, so in a built app the file is usually not emitted and the request returns 404. A bundled app passes the URL or the bytes.
+
+```ts
+// Vite
+import wasmUrl from "@mistcash/sdk/wasm/mist.wasm?url";
+import { loadProver } from "@mistcash/sdk/prover";
+
+const prover = await loadProver(wasmUrl);
+```
+
+```ts
+// Any bundler: fetch the file and pass the bytes
+import { loadProver } from "@mistcash/sdk/prover";
+
+declare const wasmUrl: string; // the URL the bundler emits for mist.wasm
+
+const bytes = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
+const prover = await loadProver(bytes);
+```
+
+On Vite, either pass the URL as above or exclude the SDK from dependency pre-bundling with `optimizeDeps: { exclude: ["@mistcash/sdk"] }`. On webpack 5 and Next.js, a static import of the wasm file yields a hashed URL to pass to `loadProver`. Load the prover in a client-side effect, not during render and not on the server.
+
+If loading fails, the error names the path or URL it tried and says to pass a source.
+
+The SDK does not inline the wasm as base64. That would add about 26 MB to every bundle, tie the wasm's cache lifetime to the JavaScript's and force a full decode in memory in place of streaming instantiation. A self-contained bundle base64-encodes the file itself and passes the decoded bytes.
+
+## Server-side rendering
+
+`import { MistClient } from "@mistcash/sdk"` is safe during server-side rendering: the root entry pulls in no wasm and no Go runtime. `@mistcash/sdk/prover` is imported from client code only. The `node` export condition keeps `node:fs` out of browser bundles.
+
+## One prover per page
+
+The Go runtime registers as `globalThis.Go`, and the prover's exports land on `globalThis`. Two provers in one page collide, and that includes `mist.wasm` next to `mist-webgpu.wasm`. `loadProver` memoizes one instance, so a second call returns the first and ignores its source. A failed load clears the memo and a retry can succeed.
+
+## The wasm assets and circuit.json
+
+The wasm files embed the proving key. The proving key must match the verifier deployed on the target chain. A mismatched wasm still produces proofs, and the Chamber rejects each one at `handleZkp`.
+
+`circuit.json` records what the shipped wasm was built from.
+
+| Field | Meaning |
+| --- | --- |
+| `sha256`, `size` | Checksum and byte size of `mist.wasm`, about 19.6 MB |
+| `webgpu.sha256`, `webgpu.size` | The same for `mist-webgpu.wasm`, about 21.5 MB |
+| `go`, `gnark` | The Go toolchain and the gnark version the wasm links |
+| `core.commit` | The mistcash/core commit the proving key was built from |
+| `builtFrom.commit` | The mist commit the wasm was built in |
+| `timestamp` | When it was built |
+
+```ts
+import circuit from "@mistcash/sdk/circuit.json" with { type: "json" };
+
+console.log(circuit.core.commit, circuit.sha256);
+```
+
+The SDK's pack step refuses to publish a wasm whose checksum or circuit commit differs from `circuit.json`. The sizes above come from the `circuit.json` in the SDK repository.
+
+On Node, `loadProver()` took about 0.15 s on a development laptop (Node 25.2.1, macOS, four runs between 0.14 s and 0.16 s). That was measured for these pages and is not a browser figure.

@@ -1,0 +1,128 @@
+---
+title: Quick start
+description: "Join a Reserve, deposit and withdraw with @mistcash/sdk in Node, against a local chain."
+sidebar:
+  order: 2
+---
+
+This page runs the whole flow in one Node script: join a Reserve, deposit into a private note, and withdraw it to the public account. It uses a local development chain, where the deployer is the Reserve admin.
+
+## Before running
+
+- A local chain with core deployed by core-deploy (`scripts/deploy.sh deploy`). At core `fa7b92d` the Chamber's runtime code is over the EIP-170 limit of 24,576 bytes, so the local chain runs with `--disable-code-size-limit`, which `deploy.sh` sets.
+- The deployment's address book, `core-deploy/dist/deployments/<chainId>.json`. The deploy script creates the fixture Reserve and lists the asset only on chain 31337 and one public development chain. Without fixtures `reserve` and `token` in the book are the zero address, and every other chain is treated as production.
+- On the local deployment, dev account 0 is the Chamber owner and the fixture Reserve's admin, the registrar holds `USERS`, and the asset is listed with a minimum deposit of 1. Dev account 5 is the guardian.
+- `PRIVATE_KEY` set to dev account 0's key.
+
+## The script
+
+Steps below form one file. Run them in order.
+
+### Chain adapter
+
+The adapter is the SDK's only link to the chain. It reads contracts, sends transactions and returns events. [Client and address book](/sdk/client/) states what each member must return.
+
+```ts
+import { readFile } from "node:fs/promises";
+import { createPublicClient, createWalletClient, http, keccak256, parseAbi, type WalletClient } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { anvil } from "viem/chains";
+import { loadProver } from "@mistcash/sdk/prover";
+import {
+  CORE_ABI,
+  MistClient,
+  decapsulate,
+  deriveUkx,
+  managerKeys,
+  rand,
+  type AddressBook,
+  type ChainAdapter,
+  type Hex,
+} from "@mistcash/sdk";
+
+const PRIVATE_KEY = process.env.PRIVATE_KEY as Hex;
+const account = privateKeyToAccount(PRIVATE_KEY);
+const publicClient = createPublicClient({ chain: anvil, transport: http() });
+const walletClient = createWalletClient({ chain: anvil, transport: http(), account });
+
+// Every read, write and event the client uses: Chamber, Reserve, registrar, asset, screening.
+const abi = parseAbi(CORE_ABI);
+
+function chainAdapter(wallet: WalletClient): ChainAdapter {
+  return {
+    readContract: (address, functionName, args) =>
+      publicClient.readContract({ address, abi, functionName: functionName as never, args: args as never }),
+    sendTransaction: async (tx) => {
+      const hash = await wallet.sendTransaction({ account: wallet.account!, chain: anvil, to: tx.to, data: tx.data, value: tx.value });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      // Pass the logs through: deposit() and spend() read NoteAppended and DepositQueued from them.
+      return { hash, receipt: { transactionHash: hash, gasUsed: receipt.gasUsed, status: receipt.status, logs: receipt.logs } };
+    },
+    // UserRegistered and UserRemoved (the users tree a spend proves against), and DepositQueued.
+    getEvents: (address, eventName, fromBlock) =>
+      publicClient.getLogs({
+        address,
+        event: abi.find((item) => item.type === "event" && item.name === eventName) as never,
+        fromBlock,
+      }),
+  };
+}
+```
+
+### Prover and client
+
+```ts
+const book = JSON.parse(await readFile("core-deploy/dist/deployments/31337.json", "utf8")) as AddressBook;
+
+const prover = await loadProver(); // reads wasm/mist.wasm from disk in Node
+const client = new MistClient({
+  book,
+  chainId: anvil.id,
+  chain: chainAdapter(walletClient),
+  prover,
+  // "me" is the public account, "me (MIST)" its private MIST identity.
+  addressOf: () => account.address,
+  // Development only: a real app derives the secret from a wallet signature.
+  secretOf: () => (BigInt(keccak256(PRIVATE_KEY)) >> 8n).toString(),
+});
+```
+
+### Join the Reserve
+
+A Reserve with members lets only members spend. The Reserve's half of the join normally runs in the key holder's service, signed by a `USERS` holder. Here the deployer is the Reserve admin, which holds every permission, so one script plays both sides.
+
+```ts
+const keys = managerKeys(PRIVATE_KEY);
+
+await client.join({
+  id: "me (MIST)",
+  reserve: book.reserve,
+  managerPublicKey: keys.publicKey,
+  managerSide: async ({ cipherText, reserve, mistAddr }) => {
+    const ukx = deriveUkx(decapsulate(cipherText, keys.secretKey), reserve, mistAddr);
+    const leaf = BigInt(await prover.hash2(mistAddr, ukx));
+    // The last valid second, in chain time. Read the digest just before signing.
+    const deadline = (await publicClient.getBlock()).timestamp + 3600n;
+    const digest = await publicClient.readContract({
+      address: book.registrar,
+      abi,
+      functionName: "registerUserDigest",
+      args: [reserve, leaf, account.address, deadline],
+    });
+    return { ukx, signer: account.address, deadline, signature: await account.sign({ hash: digest }) };
+  },
+});
+```
+
+[Joining a Reserve](/sdk/joining-a-reserve/) explains each value.
+
+### Deposit and withdraw
+
+```ts
+const amount = 10n ** 18n; // amounts are uint64, so one note holds at most about 18.4 units at 18 decimals
+
+await client.deposit({ reserve: book.reserve, id: "me (MIST)", amount, blinding: rand() });
+await client.spend({ id: "me (MIST)", amount: 0n, withdraw: amount, withdrawTo: "me", reserve: book.reserve });
+```
+
+`deposit` approves the Reserve and deposits into a note owned by `me (MIST)`. `spend` proves the withdrawal on this machine, then submits it. The withdrawal pays the public account `me`.

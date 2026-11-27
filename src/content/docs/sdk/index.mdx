@@ -1,58 +1,56 @@
 ---
 title: SDK
-description: "@mistcash/sdk, the TypeScript SDK for MIST on EVM: proving on the user's device and a client for the Chamber and Reserve contracts."
+description: "@mistcash/sdk, the TypeScript SDK for MIST on EVM: proving on the user's device and a client for the Chamber, Reserve and registrar contracts."
 sidebar:
   label: SDK overview
   order: 0
 ---
 
-`@mistcash/sdk` is the TypeScript SDK for MIST on EVM. It builds spend proofs on the user's device, in Node or in a browser, and wraps the calls to the Chamber and Reserve contracts.
+import RuledIndex from "../../../components/RuledIndex.astro";
 
-## Install
+`@mistcash/sdk` is the TypeScript SDK for MIST on EVM. It builds spend proofs on the user's device, in Node or in a browser, and wraps the calls to the Chamber, Reserve and registrar contracts.
 
-```bash
-npm install @mistcash/sdk@beta viem
-```
-
-Version 0.6 is a rewrite and ships on the `beta` tag. The `latest` tag is the legacy 0.5 SDK, which has a different API.
-
-## Entry points
-
-| Import | Contents |
-| --- | --- |
-| `@mistcash/sdk` | `MistClient`, the types, the contract ABIs and the note, proving and key-exchange helpers. Safe to import during server-side rendering: it loads no WebAssembly |
-| `@mistcash/sdk/prover` | `loadProver` and `createWorkerProver`, which run the prover from `mist.wasm`, about 20 MB, in Node or in a Web Worker |
-| `@mistcash/sdk/prover/webgpu` | The same prover on gnark's WebGPU backend. It falls back to the CPU when there is no GPU |
-| `@mistcash/sdk/mist.wasm` | The prover binary, with its proving key embedded |
-| `@mistcash/sdk/circuit.json` | The circuit description the prover was built from |
+:::caution[These pages document the next SDK release]
+They describe the SDK as it will ship, built against mistcash/core `fa7b92d`. The published `@mistcash/sdk@0.6.0-beta.1` predates it and targets an earlier contract interface, so calls such as `join` and `setReserveScreener` fail against current contracts. [Migrating from 0.6.0-beta.1](/sdk/migrating/) lists every difference.
+:::
 
 ## What the client does
 
 `MistClient` takes an address book, a chain adapter and a prover. It covers each role in the protocol.
 
-- **Depositor.** `deposit` approves a Reserve and deposits into a private note. `refreshScreening` and `reclaimDeposit` follow a deposit through a screener.
-- **Member.** `join` runs the key exchange with the Reserve's key holder and registers the member. `spend` builds the proof and submits a private payment or a withdrawal.
-- **Reserve operator.** `registerReserve`, `setReserveScreener` and `updateAuditorKey` administer a Reserve. `openPayload` reads a member's spend.
-- **Screener.** `queuedDeposits`, `approveDeposits` and `rejectDeposits` decide the deposits waiting at a Reserve.
+| Role | Methods |
+| --- | --- |
+| Depositor | `deposit`, `setDepositRefundTo`, `reclaimDeposit`, `refreshScreening` |
+| Member | `join`, `spend` for a private payment or a withdrawal |
+| Reserve admin and permission holders | `grantPermission`, `revokePermission`, `transferAdmin`, `acceptAdmin`, `setAssetMinDeposit`, `removeUser`, `revokeRegistration`, `updateAuditorKey`, `setReserveScreener` |
+| Key holder | The Reserve's half of `join`, and `openPayload` to read a member's spend |
+| Screener | `queuedDeposits`, `approveDeposits`, `rejectDeposits` |
+| Chamber owner | `registerReserve` |
 
-```ts
-// Deposit into a private note, then withdraw it back to the public account.
-await client.deposit({ reserve, id: "me (MIST)", amount, blinding: rand() });
-await client.spend({ id: "me (MIST)", amount: 0n, withdraw: amount, withdrawTo: "me", reserve });
-```
+Registration uses a post-quantum key exchange. The SDK ships X-Wing, a hybrid of ML-KEM-768 and X25519, as `encapsulate`, `decapsulate` and `deriveUkx`. The protocol does not fix the exchange, so a Reserve can use another. The proofs are Groth16 and the registration signature is ECDSA or ERC-1271, so neither is post-quantum.
 
-Registration uses a post-quantum key exchange. The SDK ships X-Wing, a hybrid of ML-KEM-768 and X25519, as `encapsulate`, `decapsulate` and `deriveUkx`. The protocol does not fix the exchange, so a Reserve can use another.
+## Pages
 
-## Caveats
+<RuledIndex
+  items={[
+    { href: "/sdk/install/", title: "Install and setup", body: "Package exports, the Node and browser prover entry points, the wasm assets and circuit.json." },
+    { href: "/sdk/quick-start/", title: "Quick start", body: "Join a Reserve, deposit and withdraw, end to end on a local chain." },
+    { href: "/sdk/client/", title: "Client and address book", body: "The configuration, the chain adapter and what each adapter member must return." },
+    { href: "/sdk/notes-and-keys/", title: "Notes and keys", body: "Identities, the note model and what the host must persist." },
+    { href: "/sdk/deposits/", title: "Deposits", body: "refundTo, minimum deposits, screening and the reclaim rules." },
+    { href: "/sdk/joining-a-reserve/", title: "Joining a Reserve", body: "The X-Wing key exchange, the registrar signature and what voids it." },
+    { href: "/sdk/transfers/", title: "Private transfers and withdrawals", body: "Note selection, tree-aware leaves, proving and who submits." },
+    { href: "/sdk/reserve-administration/", title: "Reserve administration", body: "Permissions, admin handover, removing members, revoking registrations, the screener and assets." },
+    { href: "/sdk/prover-backends/", title: "Prover backends", body: "CPU WebAssembly or WebGPU, on the main thread or in a worker." },
+    { href: "/sdk/errors/", title: "Errors and pause states", body: "Each refusal and revert message, what causes it and what clears it." },
+    { href: "/sdk/migrating/", title: "Migrating from 0.6.0-beta.1", body: "The breaking changes, with before and after." },
+  ]}
+/>
 
-:::caution[The published beta predates the contract hardening]
-`0.6.0-beta.1` was built against the earlier contract interface. It calls `Chamber.setVerifier`, `Chamber.setReserveScreener(reserve, screener)`, `Reserve.setRegistrar` and a three-argument `registerUser`. None of these exist in the contracts in mistcash/core `main`: the verifier changes through a timelock, a Reserve sets its own screener, the registrar holds a permission, and `registerUser` takes a deadline and a signer. Calls such as `join` and `setReserveScreener` fail against them until an SDK release follows the contracts.
-:::
+## Limits to know first
 
-:::caution[Before building on the SDK]
-- `secretOf` derives a MIST secret from a private key and is for development only. A browser wallet never exposes its key, so an application must derive the secret from a wallet signature.
+- `secretOf` derives a MIST secret from a private key and is for development only. A browser wallet never exposes its key, so an application derives the secret from a wallet signature.
 - The prover's note amount is a `uint64`, so one note holds at most about 18.4 units of an asset with 18 decimals. The protocol allows amounts below 2^120. Larger amounts split across notes.
-- With a `StorageAdapter`, call `restoreKeyIndices()` once at startup. Without it, a reload can reuse a key index and the Chamber reverts the spend.
-:::
+- The client keeps notes and key exchanges in memory. The host persists them, and calls `restoreKeyIndices()` at startup when it passes a `store`. [Notes and keys](/sdk/notes-and-keys/) has the detail.
 
-The repository's [README](https://github.com/mistcash/sdk) has the full setup, including bundler configuration for Vite and webpack.
+The [README](https://github.com/mistcash/sdk) in the SDK repository covers bundler configuration for Vite and webpack.

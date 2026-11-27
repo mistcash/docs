@@ -1,0 +1,92 @@
+---
+title: Prover backends
+description: "The CPU WebAssembly prover and the WebGPU prover: when to use each, the worker, fallback and load time."
+sidebar:
+  order: 9
+---
+
+The SDK proves with one Go prover in two builds: `mist.wasm` on the CPU and `mist-webgpu.wasm`, which runs the heavy steps as WebGPU compute shaders. Both use the same proving key, so both produce proofs the same `ChamberVerifier` accepts.
+
+## Choosing
+
+| | CPU | WebGPU |
+| --- | --- | --- |
+| File | `mist.wasm`, about 19.6 MB | `mist-webgpu.wasm`, about 21.5 MB |
+| Entry | `loadProver` | `loadWebGPUProver` |
+| Runs in | Node and browsers | Browsers |
+| Without a GPU | Not applicable | Proves on the CPU with the same file. `backend` says `cpu` |
+| Load time | About 0.15 s in Node, measured for these pages | Up to about 1.5 s longer than the CPU build, per the SDK README: shader compilation and the proving key's one-time upload to the GPU |
+| Proof time | About 2.5 s on an Apple M-series laptop in Chromium, per the SDK README | About 0.2 s on the same laptop, per the SDK README |
+
+The proof times are the SDK README's measurement and were not re-run for these pages. They depend on the device. The file sizes come from `circuit.json`.
+
+The WebGPU backend is gnark's. gnark marks it experimental and unaudited. It changes how a proof is computed and not what is proven.
+
+## CPU prover
+
+```ts
+import { loadProver } from "@mistcash/sdk/prover";
+
+const prover = await loadProver(); // Node: reads the wasm from disk
+```
+
+On the main thread, `spend` blocks until the proof is done. A browser app runs the prover in a worker.
+
+## Worker
+
+`createWorkerProver` runs the prover in a Web Worker. It returns the adapter, `backend()` and `terminate()`. It is browser-only.
+
+```ts
+import { createWorkerProver } from "@mistcash/sdk/prover";
+import { MistClient, type AddressBook, type ChainAdapter } from "@mistcash/sdk";
+
+declare const book: AddressBook;
+declare const chain: ChainAdapter;
+declare const wasmUrl: string; // the URL the bundler emits for mist.wasm
+
+const prover = createWorkerProver({ wasmUrl });
+const client = new MistClient({ book, chainId: 1, chain, prover });
+
+// ... use the client, then stop the worker.
+prover.terminate();
+```
+
+- Every method is proxied over `postMessage`, so each returns a promise. `MistClient` already awaits them.
+- `wasmUrl` is optional and defaults to the package's own file, which a bundler usually does not emit. See [Install and setup](/sdk/install/).
+- The worker holds the roughly 20 MB prover. Without `terminate()` it lives for the page's lifetime.
+- `terminate()` rejects every call still in flight. Later calls reject with `prover worker terminated`.
+
+## WebGPU
+
+```ts
+import { hasWebGPU, loadWebGPUProver } from "@mistcash/sdk/prover/webgpu";
+import { loadProver } from "@mistcash/sdk/prover";
+
+declare const wasmUrl: string; // the URL the bundler emits for mist.wasm
+declare const webgpuWasmUrl: string; // the URL the bundler emits for mist-webgpu.wasm
+
+// Load one prover per page: both files install the same globals.
+const prover = hasWebGPU() ? await loadWebGPUProver(webgpuWasmUrl) : await loadProver(wasmUrl);
+```
+
+`loadWebGPUProver(source?)` returns the adapter with two extra fields: `backend`, which is `webgpu` or `cpu`, and `fallbackReason` when it is `cpu`. It takes the same sources as `loadProver`.
+
+In a worker, pass `webgpu: true`. `wasmUrl` must then point at `mist-webgpu.wasm`.
+
+```ts
+import { createWorkerProver } from "@mistcash/sdk/prover";
+
+declare const webgpuWasmUrl: string; // the URL the bundler emits for mist-webgpu.wasm
+
+const prover = createWorkerProver({ webgpu: true, wasmUrl: webgpuWasmUrl });
+const { backend, fallbackReason } = await prover.backend();
+console.log(backend, fallbackReason);
+```
+
+The WebGPU loader never fails for want of a GPU. With no `navigator.gpu`, no adapter or a failed upload, the same wasm proves on the CPU and `backend` says `cpu`. `hasWebGPU()` only checks that `navigator.gpu` exists, so an adapter can still be missing. A page that prefers the smaller `mist.wasm` when there is no GPU checks `hasWebGPU()` first, as above.
+
+Shader sources are inlined into the SDK's JavaScript, so nothing is fetched from a path a bundler never emits.
+
+## The prover adapter
+
+`MistClient` needs a `ProverAdapter`: `hash2`, `spend` and, for `openPayload`, `decrypt`. Each may be synchronous or return a promise. The loaders return a `FullProverAdapter`, which adds `hash3`. A host can supply its own adapter, such as one that proves on a server.
