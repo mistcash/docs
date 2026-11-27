@@ -1,6 +1,6 @@
 ---
 title: ManagerSigRegistrar
-description: "The registrar that adds a member to a Reserve on an EIP-712 signature from a USERS holder: domain and struct, deadline, revocation, ERC-1271, and the registration-count binding."
+description: "The registrar that adds a member to a Reserve on an EIP-712 signature from a USERS holder: domain and struct, the signer, leaf-nonce and revocation bindings, deadline, revoke and ERC-1271."
 sidebar:
   order: 5
 ---
@@ -14,7 +14,7 @@ A Reserve uses the registrar after two grants by its admin:
 1. `grantPermission(USERS, registrar)`, so the registrar can call `Reserve.addUser`.
 2. `grantPermission(USERS, signer)` for each account whose signatures it should accept. The admin holds `USERS` implicitly and can sign without a grant.
 
-The signer names itself in each call, so several signers can serve one Reserve.
+Each signature names its signer, so several signers can serve one Reserve.
 
 ## The signed message
 
@@ -24,40 +24,52 @@ The registrar uses EIP-712:
 | --- | --- |
 | Domain type | `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)` |
 | `name` | `MistReserveRegistrar` |
-| `version` | `2` |
+| `version` | `3` |
 | `chainId` | `block.chainid`, read on every call, so a chain fork gets its own domain |
 | `verifyingContract` | The registrar's address |
-| Struct type | `RegisterUser(address reserve,uint256 leaf,uint256 registrations,uint256 deadline)` |
-| `REGISTER_USER_TYPEHASH` | `0x6588b0d0279abb2e1a411801d4c8d83f482215f054953374f5b15da0702fce40` |
+| Struct type | `RegisterUser(address reserve,uint256 leaf,uint256 leafNonce,uint256 revocations,address signer,uint256 signerEpoch,uint256 deadline)` |
+| `REGISTER_USER_TYPEHASH` | `0x08047a61f834abacb9e6933736e7a17a949d36d81dc3bb91db74050ad7d1d06b` |
 
-- **`leaf`** is `H2(owner, userKeyExchange)`, computed off-chain. `userKeyExchange` stays off-chain and must be a full-entropy key-exchange output, or the leaf can be brute-forced.
-- **`registrations`** is `Reserve(reserve).registrations(leaf)` when the call lands. Every registration of the leaf increments it.
-- **`deadline`** is the last valid timestamp, inclusive.
+| Field | Value when the call lands | Moves when |
+| --- | --- | --- |
+| `reserve` | The Reserve to register on | Never |
+| `leaf` | `H2(owner, userKeyExchange)`, computed off-chain | Never |
+| `leafNonce` | `Reserve(reserve).leafNonce(leaf)` | The leaf is registered or removed |
+| `revocations` | `revocations(reserve, leaf)` on the registrar | A `USERS` holder calls `revoke(reserve, leaf)` |
+| `signer` | The account that signed | Never |
+| `signerEpoch` | `Reserve(reserve).permissionEpoch(USERS, signer)` | The signer loses `USERS` |
+| `deadline` | The last valid timestamp, inclusive | Never |
 
-`registerUserDigest(reserve, leaf, deadline)` returns the digest to sign, with the current count filled in: `keccak256("\x19\x01" || domainSeparator() || structHash)`.
+`userKeyExchange` stays off-chain and must be a full-entropy key-exchange output, or the leaf can be brute-forced.
+
+`registerUserDigest(reserve, leaf, signer, deadline)` returns the digest to sign, with the three counters filled in at their current values: `keccak256("\x19\x01" || domainSeparator() || structHash)`.
 
 A signer can produce the same digest with viem's `signTypedData`. This assumes `publicClient`, `walletClient`, `account`, `reserve`, `registrar`, `leaf` and `deadline` are already defined:
 
 ```ts
-import { parseAbi } from "viem";
+import { keccak256, parseAbi, toHex } from "viem";
 
 const reserveAbi = parseAbi([
-  "function registrations(uint256 leaf) view returns (uint256)",
+  "function leafNonce(uint256 leaf) view returns (uint256)",
+  "function permissionEpoch(bytes32 role, address account) view returns (uint256)",
 ]);
+const registrarAbi = parseAbi([
+  "function revocations(address reserve, uint256 leaf) view returns (uint256)",
+]);
+const USERS = keccak256(toHex("USERS"));
 
-// The count moves on every registration, so read it just before signing.
-const registrations = await publicClient.readContract({
-  address: reserve,
-  abi: reserveAbi,
-  functionName: "registrations",
-  args: [leaf],
-});
+// All three counters can move, so read them just before signing.
+const [leafNonce, signerEpoch, revocations] = await Promise.all([
+  publicClient.readContract({ address: reserve, abi: reserveAbi, functionName: "leafNonce", args: [leaf] }),
+  publicClient.readContract({ address: reserve, abi: reserveAbi, functionName: "permissionEpoch", args: [USERS, account.address] }),
+  publicClient.readContract({ address: registrar, abi: registrarAbi, functionName: "revocations", args: [reserve, leaf] }),
+]);
 
 const signature = await walletClient.signTypedData({
   account,
   domain: {
     name: "MistReserveRegistrar",
-    version: "2",
+    version: "3",
     chainId: await publicClient.getChainId(),
     verifyingContract: registrar,
   },
@@ -65,12 +77,15 @@ const signature = await walletClient.signTypedData({
     RegisterUser: [
       { name: "reserve", type: "address" },
       { name: "leaf", type: "uint256" },
-      { name: "registrations", type: "uint256" },
+      { name: "leafNonce", type: "uint256" },
+      { name: "revocations", type: "uint256" },
+      { name: "signer", type: "address" },
+      { name: "signerEpoch", type: "uint256" },
       { name: "deadline", type: "uint256" },
     ],
   },
   primaryType: "RegisterUser",
-  message: { reserve, leaf, registrations, deadline },
+  message: { reserve, leaf, leafNonce, revocations, signer: account.address, signerEpoch, deadline },
 });
 ```
 
@@ -91,13 +106,24 @@ Anyone can call it. It checks, in order:
 | Check | Revert |
 | --- | --- |
 | `block.timestamp <= deadline` | `Registrar: signature expired` |
-| The digest is not revoked | `Registrar: signature revoked` |
 | `signer` holds `USERS` on `reserve` | `Registrar: missing users permission` |
-| The signature is valid for `signer` | `Registrar: invalid signature` |
+| The signature is valid for `signer` over the digest at the current counters | `Registrar: invalid signature` |
+
+A signature whose leaf nonce, revocation count or signer epoch has moved since it was made no longer matches the digest, and fails the last check.
 
 It then calls `Reserve(reserve).addUser(leaf)` and returns the leaf. The Reserve emits `UserRegistered(leaf, index, root)` with the index that `removeUser` needs, and pushes its new users root to the Chamber, which changes the shared zkState root.
 
 Whoever holds a signature chooses when, before the deadline, the registration lands.
+
+## What voids a signature
+
+| Event | Effect |
+| --- | --- |
+| The registration lands | `leafNonce` moves, so the signature cannot register the leaf twice |
+| The member is removed | `leafNonce` moves, so no signature made before the removal can put the member back. Re-registering needs a new signature |
+| A `USERS` holder calls `revoke(reserve, leaf)` | `revocations` moves, cancelling every outstanding signature for the leaf, from every signer, with any deadline. Signatures made afterwards work |
+| The signer loses `USERS` | `signerEpoch` moves, on a revoke of its grant or when it hands the admin role on. Granting the role again does not revive its old signatures |
+| The deadline passes | The call reverts with `Registrar: signature expired` |
 
 ## Signatures
 
@@ -117,18 +143,9 @@ The registrar accepts whatever a `USERS` holder with code approves. Grant `USERS
 ## Revoking
 
 ```solidity
-function revoke(address reserve, uint256 leaf, uint256 deadline) external;
+function revoke(address reserve, uint256 leaf) external;
 ```
 
-A `USERS` holder on `reserve` can revoke one authorisation before it is used. `revoke` computes the digest for `(reserve, leaf, deadline)` at the leaf's current registration count, marks it in `revoked`, and emits `SignatureRevoked(reserve, leaf, deadline, digest)`. Revocation is permanent. Any `USERS` holder can revoke a digest, whoever signed it.
-
-## Registration-count binding
-
-The signed message carries `registrations`, and `addUser` increments it on every registration. Two things follow:
-
-- A signature registers the leaf at most once. After it lands, the count has moved and the digest no longer matches.
-- A member who was removed cannot return with any signature collected before their latest registration. Re-registering needs a new signature.
-
-A signature made while the member is registered carries the current count, so it stays valid after a removal and can re-register the member until its deadline. Do not sign ahead for a registered leaf. `revoke` is the only way to cancel a signature before its deadline.
+Any `USERS` holder on `reserve` can call it, or it reverts with `Registrar: missing users permission`. It increments `revocations(reserve, leaf)` and emits `SignaturesRevoked(reserve, leaf, revocations)`. Every signature for that leaf made before the call stops working, whoever signed it.
 
 Removing a member is not done here: a `USERS` holder calls `Reserve.removeUser(index)` directly. See [Reserve](/contracts/reserve/#users-tree).
