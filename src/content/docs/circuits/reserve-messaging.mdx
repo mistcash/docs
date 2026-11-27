@@ -1,0 +1,155 @@
+---
+title: Reserve messaging
+description: "How the circuit binds a spend to its Reserve's state, checks that the sender is a member, and encrypts the spend's details for the key holder with the Hash-and-Add keystream."
+sidebar:
+  order: 5
+---
+
+import Figure from "../../../components/diagrams/Figure.astro";
+import Cell from "../../../components/diagrams/Cell.astro";
+
+At a Reserve with registered users, every spend must come from a member and must publish its details encrypted under a key that member shares with the key holder. The primary circuit does the encryption itself. No second circuit is involved.
+
+## The Reserve's zkState leaf
+
+The Chamber keeps one zkState leaf per Reserve:
+
+```text
+reserveConfig = H2(keyHash, keyInputPoint)
+stateLeaf     = H3(reserve, reserveConfig, usersRoot)
+```
+
+`keyHash` and `keyInputPoint` are two opaque field elements of Reserve metadata. The circuit binds `reserveConfig` into the leaf and never opens it. `usersRoot` is the root of the Reserve's registered-users tree, zero while the tree is empty.
+
+The circuit proves the leaf is in `state_root` on every spend, with messaging on or off. `usersRoot` is therefore read off the leaf the Chamber committed, so a prover cannot claim a zero users root to skip messaging at a Reserve that has members.
+
+## Messaging on and off
+
+Messaging is on when `usersRoot` is not zero. The rules are gated with `Select`, not by branching, so the circuit's shape and constraint count are the same either way.
+
+| Rule | `usersRoot == 0` | `usersRoot != 0` |
+| --- | --- | --- |
+| zkState leaf is in `state_root` | Checked | Checked |
+| Both inputs have the same owner | Not checked | Checked |
+| The sender is a member | Not checked | `H2(In1.Owner, userKeyExchange)` is in `usersRoot` |
+| `KeyIndex` fits in 8 bits | Checked | Checked |
+| `auditor_commitments` | Free | Equals `Fold2([privateTxKey, c0, c1, c2, c3, c4])` |
+
+A new Reserve's leaf is `H3(reserve, reserveConfig, 0)`, so it is spendable from its first block with no sync step. Messaging switches on when the first user registers, and from then on it applies to every note at that Reserve, notes created earlier included. It never switches off: a removal that would leave the users tree empty reverts, and the Chamber refuses a users root that returns to zero.
+
+When a Reserve's users root first becomes non-zero, the Chamber stops accepting every superseded zkState root at once. Those roots hold a zero users root for that Reserve and would let a spend skip messaging.
+
+:::caution[Unregistered and removed holders cannot spend at a Reserve with members]
+A deposit cannot check membership, because the owner commitment hides the owner. A holder who deposited before being registered, or before the Reserve had members, cannot spend or withdraw until they are registered. A removed member is in the same position once the 10-minute grace window has passed. An exit spend that lets any owner withdraw in public is **Planned**.
+:::
+
+## Membership
+
+A member's leaf is `H2(owner, userKeyExchange)`. `owner` is the owner of the notes the member spends: a MIST Address or a wallet address. `userKeyExchange` is a value the member and the key holder agree off-chain. It never appears on-chain, and it must be a full-entropy key-exchange output, or the public leaf could be brute-forced. The protocol does not fix the exchange.
+
+The Reserve's registrar adds the leaf, and only this hash goes on-chain. A removed member's leaf is set to zero. A member who was removed can still prove against a zkState root that holds their leaf until that root leaves the 10-minute grace window. After that, their notes at the Reserve are frozen until they are registered again. [Contracts](/contracts/) covers registration and removal.
+
+## Key and keystream
+
+The spend picks a `KeyIndex` from 0 to 255 and derives a fresh key:
+
+```text
+k = H2(userKeyExchange, keyIndex)
+```
+
+Hash-and-Add is a stream cipher on the width-4 Poseidon2 permutation `P4`. The block at counter `s` permutes `(k, s, s + 1, s + 2)` and emits three masked elements:
+
+```text
+e_j = P4(k, s, s + 1, s + 2)[j + 1] - k,   j = 0, 1, 2
+```
+
+`state[0]` and the raw lanes never leave the block, so a known plaintext reveals only a masked value. Blocks advance the counter by 3. Messaging starts the stream at `s = 0`.
+
+- **The identifier** is the stream's first element, `P4(k, 0, 1, 2)[1] - k`. Core calls it `privateTxKey`. It encrypts nothing.
+- **The keystream** is the rest of the stream in order: the last two elements of block 0, then three per block.
+- **Encryption** is `c_i = m_i + κ_i mod r`. Decryption subtracts the same keystream.
+
+<Figure
+  label="Reserve messaging in three steps. Key: the member's key exchange and a key index give a fresh key, never published. Stream: two permutation blocks emit the identifier and five keystream elements. Published: six elements in calldata, the identifier followed by five ciphertexts, whose fold is the public input auditor_commitments."
+  caption="Two blocks cover the identifier and five ciphertexts. The coral cell is the identifier, the one element the key holder searches for. Everything published is calldata."
+>
+  <ol class="mist-moves">
+    <li class="mist-move">
+      <p class="mist-label">1 Key</p>
+      <div class="mist-move__stage">
+        <Cell state="hidden" />
+        <span class="mist-lane" aria-hidden="true"></span>
+        <Cell state="hidden" />
+      </div>
+      <p class="mist-move__note">The key exchange and a key index give the key. Neither is published.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">2 Stream</p>
+      <ul class="mist-record__parts">
+        <li class="mist-chip">Block 0</li>
+        <li class="mist-chip">Block 1</li>
+      </ul>
+      <p class="mist-move__note">Block 0 emits the identifier and two keystream elements. Block 1 emits three more.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">3 Six published</p>
+      <div class="mist-move__stage">
+        <Cell state="followed" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+        <Cell state="recorded" />
+      </div>
+      <p class="mist-move__note">The identifier, then five ciphertexts. Their fold is auditor_commitments.</p>
+    </li>
+  </ol>
+</Figure>
+
+## The six commitments
+
+The plaintext is fixed by `ReservePlaintext` in `core/circuits/src/primary.go`. A spend publishes either nothing or exactly these six elements:
+
+| Element | Contents |
+| --- | --- |
+| 0 | `privateTxKey`, the identifier |
+| 1 | Ciphertext of the asset address |
+| 2 | Ciphertext of output 1's owner commitment |
+| 3 | Ciphertext of output 1's amount |
+| 4 | Ciphertext of output 2's owner commitment |
+| 5 | Ciphertext of output 2's amount |
+
+Their fold is the public input:
+
+```text
+auditor_commitments = H2(H2(H2(H2(H2(e0, e1), e2), e3), e4), e5)
+```
+
+The circuit fixes only the fold. `Chamber.handleZkp` takes the six elements as `auditorCommitments_` and requires each to be below the field order and the six to fold to input 13, or an empty array when input 13 is 0. It files the spend under element 0 in `privateTxCommitments`, reverts with `private tx key used` if that identifier was filed before, and emits `PrivateTransfer(privateTxKey, newNote1, newNote2, commitments)`.
+
+At a Reserve without members, `auditor_commitments` is free. A spend there may publish nothing, which leaves `auditor_commitments = 0`, or six elements of its choosing. To anyone without the key, ciphertexts and identifiers look uniformly random, so random elements look the same.
+
+## Decryption
+
+The key holder holds each member's `userKeyExchange`. For each member and each key index from 0 to 255, it derives `k`, computes the identifier and looks it up in `privateTxCommitments` or in `PrivateTransfer` events, where it is indexed. A match gives the six elements, and subtracting the keystream gives the plaintext.
+
+| The key holder learns | The key holder does not learn |
+| --- | --- |
+| Which member sent the spend, the asset, both output owner commitments and both output amounts | Who the recipients are: they appear only as owner commitments. The two input amounts one by one |
+
+Handing one spend's `k` to a reviewer reveals that spend only: recovering `userKeyExchange` from `k` is a preimage problem. The ciphertext is not addressed to the recipient, so a recipient cannot use it to find their note.
+
+## Limits
+
+| Limit | Effect |
+| --- | --- |
+| 256 identifiers per key exchange | `KeyIndex` is range-checked to 8 bits. After 256 messaging spends a member needs a new key exchange and a new registration |
+| One namespace for every Reserve | The Chamber files identifiers first come, first served across all Reserves, and the record names no Reserve. Whoever holds a member's key exchange can derive that member's identifiers and file a real spend under one first. At a Reserve without members anyone can file under any identifier |
+| Calldata is public | Hash-and-Add hides the plaintext only from someone without the key exchange. Hash-and-Add is symmetric, so the long-term privacy of the ciphertexts rests on the key exchange the Reserve picks |
+| Sender only | The record identifies the sender. It carries no beneficiary record and no per-input record |
+
+Sequential, owner-bound identifiers, which remove the 256 cap and stop identifier squatting, are **Planned**.
+
+## Cost
+
+A keystream block costs the same however many of its elements are used. Core's committed constraint snapshot records 265 constraints for one or two plaintexts and 529 for three, each measured on a wrapper circuit that adds one equality assertion. Messaging's identifier and five ciphertexts take two blocks. The snapshot has no entry for five plaintexts on its own.

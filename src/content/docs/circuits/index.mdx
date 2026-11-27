@@ -6,6 +6,8 @@ sidebar:
   order: 0
 ---
 
+import RuledIndex from "../../../components/RuledIndex.astro";
+
 Every MIST spend is one Groth16 proof of one circuit, `PrimaryTransactionCircuit`. It is written in Go with gnark and proven over BN254.
 
 The circuit enforces the money rules. Nothing is printed or destroyed: value is pooled and moved from one set of notes to another, or withdrawn on-chain.
@@ -70,6 +72,19 @@ Costs are R1CS constraints, recorded in the constraint snapshot that core commit
 ## Planned
 
 The specification describes three circuit changes that are not built: a relayer fee leg, exit spends that let any owner leave a Reserve, and sequential messaging identifiers. Each lands as its own circuit version.
+
+## Detailed pages
+
+<RuledIndex
+  items={[
+    { href: "/circuits/spend/", title: "What a spend proves", body: "The 2-in/2-out shape, dummy notes, every rule the circuit asserts, the two authorisation modes and withdrawal binding." },
+    { href: "/circuits/public-inputs/", title: "Public inputs", body: "All 14 public inputs in order, their encoding and binding, and what one spend reveals." },
+    { href: "/circuits/notes-and-hashes/", title: "Notes and hashes", body: "Chamber ID, custody binding, owner commitment, note hash, nullifier and the Poseidon2 parameters." },
+    { href: "/circuits/merkle-trees/", title: "Merkle trees", body: "The 4-ary HM4 tree, prover-ordered insertion, the 30-element proof and the three trees that use it." },
+    { href: "/circuits/reserve-messaging/", title: "Reserve messaging", body: "The zkState leaf, the users tree, the Hash-and-Add keystream, privateTxKey and the six commitments." },
+    { href: "/circuits/constraints-and-setup/", title: "Constraints and trusted setup", body: "The measured constraint count, the proof system and the single-party setup." },
+  ]}
+/>
 
 ## Source
 

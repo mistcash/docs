@@ -1,0 +1,135 @@
+---
+title: What a spend proves
+description: "The 2-in/2-out shape of a MIST spend, every rule PrimaryTransactionCircuit asserts about it, the two authorisation modes, and what the circuit leaves to the Chamber."
+sidebar:
+  order: 1
+---
+
+import Figure from "../../../components/diagrams/Figure.astro";
+import Cell from "../../../components/diagrams/Cell.astro";
+
+A spend consumes two notes and creates two, with an optional public withdrawal. `PrimaryTransactionCircuit` proves that the move follows the money rules without revealing which notes were spent, who owns the new ones or how the amounts split.
+
+## Shape
+
+Every spend has the same shape: two input notes, two output notes and one optional withdrawal. A zero-amount dummy fills a slot that has no real note, so a spend with one real input or one real output looks like any other.
+
+<Figure
+  label="A spend in three parts. Inputs: two notes from one transactions tree, one of which may be a zero-amount dummy. Proof: one Groth16 proof checks range, conservation, membership, authorisation and the Reserve's state. Outputs: two new note hashes, always appended, and an optional withdrawal to a public address."
+  caption="The fixed shape. The coral cell is a new note: only its hash is published. A withdrawal is the only part of a spend that names an amount, an asset, a Reserve and a recipient."
+>
+  <ol class="mist-moves">
+    <li class="mist-move">
+      <p class="mist-label">1 Two inputs</p>
+      <div class="mist-move__stage">
+        <span class="mist-pair"><Cell state="recorded" /><Cell state="empty" /></span>
+      </div>
+      <p class="mist-move__note">Two notes from one transactions tree, or one note and a zero-amount dummy. Each publishes a nullifier.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">2 One proof</p>
+      <ul class="mist-record__parts">
+        <li class="mist-chip">Range</li>
+        <li class="mist-chip">Conservation</li>
+        <li class="mist-chip">Membership</li>
+        <li class="mist-chip">Authorisation</li>
+        <li class="mist-chip">Reserve state</li>
+      </ul>
+      <p class="mist-move__note">One Groth16 proof binds 14 public inputs.</p>
+    </li>
+    <li class="mist-move">
+      <p class="mist-label">3 Two outputs</p>
+      <div class="mist-move__stage">
+        <span class="mist-pair"><Cell state="followed" /><Cell state="recorded" /></span>
+        <span class="mist-lane" aria-hidden="true"></span>
+        <span class="mist-chip">Withdrawal</span>
+      </div>
+      <p class="mist-move__note">Two new note hashes, always appended, plus an optional payout to a public address.</p>
+    </li>
+  </ol>
+</Figure>
+
+The circuit's private inputs, as declared in `core/circuits/src/primary.go`:
+
+| Group | Fields | Meaning |
+| --- | --- | --- |
+| Custody | `Chamber`, `Reserve` | The Chamber ID and the Reserve address. One pair for the whole spend, not one per note |
+| Input notes | `In1`, `In2` | Each has `Blinding`, `Owner`, `OwnerSecret`, `Asset.Addr`, `Asset.Amount` and a `MerkleProof` of 10 levels by 3 siblings |
+| Output notes | `Out1Owner`, `Out1Amt`, `Out2Owner`, `Out2Amt` | Each output is an owner commitment and an amount. The asset is the spend's asset |
+| Reserve messaging | `ReserveConfig`, `UsersRoot`, `ReserveProof`, `UserKeyExchange`, `UserProof`, `KeyIndex` | The Reserve's zkState leaf and its proof, the sender's registered key exchange and its proof, and the key index. See [Reserve messaging](/circuits/reserve-messaging/) |
+
+## Dummy notes
+
+A dummy is a note with amount 0.
+
+- **A dummy output** is an ordinary new note with amount 0. Its hash is appended like any other.
+- **A dummy input** still supplies a Merkle proof, and the circuit still folds it, but the result is discarded instead of compared with `transactions_root`. The dummy's blinding and Merkle proof are free.
+
+Three things about a dummy input are still pinned. Its custody is the spend's, by construction. Its asset address must equal the other input's. Its owner must pass the same authorisation rule as a real input.
+
+The circuit asserts that at least one input is real (`in1Dummy * in2Dummy == 0`). A dummy's nullifier is derived and published like a real one, and the Chamber marks it spent. A prover therefore picks a fresh blinding for every dummy: a dummy whose nullifier is already spent makes the spend revert.
+
+## The rules
+
+Each row is an assertion in `PrimaryTransactionCircuit.Define`.
+
+| Rule | What the circuit asserts |
+| --- | --- |
+| Range | Every amount fits in 120 bits: both input amounts, both output amounts and `withdraw_amount`. The conservation sum therefore cannot wrap around the field |
+| Conservation | `In1.Amount + In2.Amount == Out1Amt + Out2Amt + withdraw_amount` |
+| One asset | The second input's asset address equals the first input's. Outputs carry no asset field of their own: they are hashed with the first input's asset |
+| One custody | `H2(Chamber, Reserve)` is computed once and fed into every note hash and nullifier. There is no per-note Chamber or Reserve field, so every note in a spend has the same custody. Beyond that one `H2`, the rule costs no constraints |
+| Membership | Each real input's Merkle fold equals `transactions_root`. Both inputs are proven against the same root, so both sit in the same transactions tree |
+| Nullifiers | Each input's nullifier is derived from the note and equals the public `nullifier_1` or `nullifier_2` |
+| Distinct nullifiers | `nullifier_1 != nullifier_2`, so one note cannot fill both input slots and double its value |
+| New notes | `new_note_i == H4(custody, OutiOwner, asset, OutiAmt)` for both outputs |
+| Authorisation | Set by `auth_done`, below |
+| Withdrawal pinning | `withdraw_asset` and `withdraw_reserve` are 0 without a withdrawal and the spend's asset and Reserve with one, below |
+| Reserve state | The Reserve's zkState leaf is in `state_root` on every spend. At a Reserve with registered users, the messaging rules apply. See [Reserve messaging](/circuits/reserve-messaging/) |
+| Payload pinning | `withdraw_to` and `tx_payload` are each squared once, so the verifying key binds them. See [Public inputs](/circuits/public-inputs/#binding) |
+
+The note hash and nullifier formulas are on [Notes and hashes](/circuits/notes-and-hashes/).
+
+## Authorisation
+
+The public flag `auth_done` picks who authorises the spend: the proof itself, or the Chamber by checking the caller. The check runs on each input note, so the notes actually spent are the ones authorised.
+
+|  | `auth_done = 1` | `auth_done = 0` |
+| --- | --- | --- |
+| Owner type | A MIST Address, `H2(p, 0x6f776e6572)` | A wallet or contract address |
+| Circuit | Each input's `Owner` equals `H2(OwnerSecret, 0x6f776e6572)`. The two inputs may have different owners, except at a Reserve with registered users | Both inputs have the same `Owner`, and it equals the public `owner` |
+| Chamber | Ignores `owner` | Requires `owner == uint160(msg.sender)`, or reverts with `only owner caller` |
+| Who can submit | Anyone, for example a relayer | Only the owner, as the caller |
+| What is public | `owner` is unconstrained and should not be read | `owner` is the wallet or contract address, in the clear |
+
+The gate is a `Select`, not a branch, so both modes have the same circuit shape and constraint count. `Select` constrains `auth_done` to be boolean, and the Chamber reverts with `invalid authDone` on any value other than 0 or 1.
+
+Neither mode can spend the other's notes. A wallet-owned note cannot be spent with `auth_done = 1`, because a 160-bit address is not an `H2(p, 0x6f776e6572)` image without a preimage. A MIST Address note cannot be spent with `auth_done = 0`, because the Chamber compares `owner` with a 160-bit caller address.
+
+Sender privacy holds only for notes owned by a MIST Address. A spend with `auth_done = 0` publishes its owner. That is how a middleware works: it owns notes as a contract, and only it can submit their spends.
+
+## Withdrawal binding
+
+A spend withdraws when `withdraw_amount` is not 0.
+
+| Input | Without a withdrawal | With a withdrawal |
+| --- | --- | --- |
+| `withdraw_amount` | 0 | Any amount that fits in 120 bits and satisfies conservation |
+| `withdraw_asset` | 0, so a private payment does not reveal its asset | The spend's asset |
+| `withdraw_reserve` | 0, so a private payment does not reveal its Reserve | The spend's Reserve, which the Chamber calls to pay out |
+| `withdraw_to` | Free, but bound by the proof | The recipient. The prover's choice, bound by the proof |
+
+The circuit does not range-check `withdraw_to`. The Chamber rejects `withdraw_asset`, `withdraw_reserve` and `withdraw_to` at or above 2^160 with `address input out of range`, before it verifies the proof. Because the proof binds `withdraw_to`, a relayer that submits an `auth_done = 1` withdrawal cannot redirect it.
+
+## What the circuit leaves to the Chamber
+
+A proof is a statement about notes and roots. These checks need on-chain state, so `Chamber.handleZkp` makes them:
+
+- **Spent nullifiers.** The circuit cannot know whether a nullifier was already used. The Chamber reverts with `transaction is spent`.
+- **Known roots.** `transactions_root` must be a root some transactions tree has had, and `state_root` must be the current zkState root or one superseded less than 10 minutes ago. A Reserve's first registration retires superseded roots at once: see [Reserve messaging](/circuits/reserve-messaging/#messaging-on-and-off).
+- **The Chamber itself.** No public input carries the Chamber ID: `Chamber` is a private input. Two Chambers that shared a verifier would be kept apart only by their roots, since `transactions_root` must be in this Chamber's history and `state_root` names this Chamber's Reserves.
+- **The caller,** when `auth_done = 0`.
+- **The published commitments.** The six elements in calldata must fold to `auditor_commitments`.
+- **Address width** of the three address inputs.
+
+[Contracts](/contracts/) covers `handleZkp` and the order of these checks.

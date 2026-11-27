@@ -1,0 +1,63 @@
+---
+title: Public inputs
+description: "The 14 public inputs of PrimaryTransactionCircuit in order, how each is encoded and bound, and what one spend reveals to observers and to a Reserve's key holder."
+sidebar:
+  order: 2
+---
+
+A proof binds 14 public inputs. `Chamber.handleZkp` passes them to the verifier as `uint256[14] input` and decodes them into its `PublicParams` struct in the same order.
+
+## The 14 inputs
+
+gnark orders public inputs by field declaration in `PrimaryTransactionCircuit`. `Withdraw` is a `note.Asset`, whose fields are `Amount` then `Addr`, so the withdrawal amount comes before its asset. The index is the position in `handleZkp`'s `input` array.
+
+| Index | Name | Circuit field | `PublicParams` field | Meaning |
+| --- | --- | --- | --- | --- |
+| 0 | `nullifier_1` | `Nullifier1` | `nullifier1` | Nullifier of the first input note |
+| 1 | `nullifier_2` | `Nullifier2` | `nullifier2` | Nullifier of the second input note |
+| 2 | `new_note_1` | `NewNote1` | `newNote1` | First new note hash, appended to the transactions tree |
+| 3 | `new_note_2` | `NewNote2` | `newNote2` | Second new note hash, appended after the first |
+| 4 | `transactions_root` | `TransactionsRoot` | `transactionsRoot` | The transactions-tree root both inputs are proven against |
+| 5 | `state_root` | `StateRoot` | `stateRoot` | The zkState root holding the Reserve's leaf |
+| 6 | `withdraw_amount` | `Withdraw.Amount` | `withdrawAmount` | Amount paid out on-chain, 0 for a private payment |
+| 7 | `withdraw_asset` | `Withdraw.Addr` | `withdrawAsset` | The asset paid out, 0 without a withdrawal |
+| 8 | `withdraw_reserve` | `WithdrawReserve` | `withdrawReserve` | The Reserve that pays out, 0 without a withdrawal |
+| 9 | `withdraw_to` | `WithdrawTo` | `withdrawTo` | The public recipient of a withdrawal |
+| 10 | `tx_payload` | `TxPayload` | `txPayload` | Free data for a middleware. The Chamber decodes it and does not use it |
+| 11 | `owner` | `Owner` | `owner` | The owner the Chamber compares with the caller when `auth_done = 0` |
+| 12 | `auth_done` | `AuthDone` | `authDone` | 1 when the proof authorised the spend, 0 when the caller must be `owner` |
+| 13 | `auditor_commitments` | `AuditorCommitments` | `auditorCommitments` | The `Fold2` of the six commitment elements the spend publishes, or 0 |
+
+The count and order are the decoding contract between the circuit, `ChamberVerifier.sol` and `Chamber.PublicParams`. Changing either means a new circuit, a new verifier and a new `PublicParams` together. Core's `TestVerifierPublicInputCountMatchesCircuit` holds all three to 14. No check compares the order field by field: it is held by the circuit's declaration order matching `PublicParams`, and the Foundry suite replays a real proof through `handleZkp`.
+
+## Encoding
+
+- **Field elements.** Every input is an element of the BN254 scalar field, passed as a `uint256` below the field order `r`. The verifier reverts with `PublicInputNotInField` on anything larger. The check matters: the EVM's scalar-multiplication precompile reduces its scalar, so without it `x` and `x + r` would verify alike and a spent nullifier could be replayed under its alias.
+- **Addresses.** Addresses enter the field as left-padded big-endian `uint160` values, with no reduction. The Chamber requires inputs 7, 8 and 9 to be below 2^160, or reverts with `address input out of range`, and reads them as `address`.
+- **`auth_done`** is 0 or 1. The circuit's `Select` constrains it to be boolean, and the Chamber reverts with `invalid authDone` on any other value.
+- **`auditor_commitments`** comes with its preimage. `handleZkp` takes a third argument, `uint256[] auditorCommitments_`, which must be six elements below `r` that fold to input 13, or empty when input 13 is 0.
+
+## Binding
+
+Groth16 binds a public input only through a non-zero coefficient in some constraint. An input that no constraint reads drops out of the verifier's public-input sum and can be rewritten in calldata without invalidating the proof. Every input here is read by a constraint:
+
+| Inputs | Bound by |
+| --- | --- |
+| `nullifier_1`, `nullifier_2`, `new_note_1`, `new_note_2` | Equality with the hashes the circuit computes |
+| `transactions_root` | The membership check of each input. For a dummy input the root is selected in place of the fold, which still reads it |
+| `state_root` | The Reserve's zkState membership check, which runs on every spend |
+| `withdraw_amount`, `withdraw_asset`, `withdraw_reserve` | Range check, conservation and withdrawal pinning |
+| `withdraw_to`, `tx_payload` | A square, `x * x`, whose result is unused. No other constraint reads them |
+| `owner`, `auth_done` | The authorisation gate |
+| `auditor_commitments` | The messaging equality. It is conditional, but the conditional form keeps the coefficient non-zero even when messaging is off and the value is free |
+
+The squares look like dead weight and are not. A linear identity would not do the same job: its terms cancel to a zero coefficient. Core's `TestEveryPublicInputIsBound` changes each input of a real Groth16 proof in turn and requires verification to fail.
+
+## What one spend reveals
+
+| To | Learns | Does not learn |
+| --- | --- | --- |
+| Any observer | Both nullifiers and both new note hashes. Both roots. Whether a withdrawal happened, and its amount, asset, Reserve and recipient. `auditor_commitments` and its six-element preimage. `owner` and `auth_done`. Whatever is in `tx_payload` | Which notes were spent. The input amounts and how the outputs split them. The asset and the Reserve of a private payment. Who owns the new notes. Whether an input was a dummy |
+| The key holder of a Reserve with registered users | For each member spend: which member sent it, the asset, both output owner commitments and both output amounts | Who the recipients are: they appear only as owner commitments. The two input amounts one by one |
+
+Every spend has the same shape and appends two notes, zero-amount outputs included, so spends look alike. A payment inside MIST hides among the notes of every Reserve, because the transactions tree is shared. A withdrawal reveals its Reserve, so it hides only among that Reserve's notes. A spend with `auth_done = 0` names its owner, so it gives up sender privacy.

@@ -1,0 +1,76 @@
+---
+title: Constraints and trusted setup
+description: "The measured constraint count of PrimaryTransactionCircuit, the proof system it runs on, and the status of its trusted setup: single-party keys, no multi-party ceremony."
+sidebar:
+  order: 6
+---
+
+`PrimaryTransactionCircuit` compiles to 17,318 R1CS constraints. Its proving and verifying keys come from a single-party Groth16 setup. No multi-party ceremony has been run.
+
+## Constraint counts
+
+Core commits the count of every circuit and gadget in `core/circuits/build/.constraint-snapshot`. The figures below are that file at core `fa7b92d`, unchanged since `cf1413d`. Core's `TestConstraintSnapshotMatchesCompile` compiles each entry that core builds and fails if any count differs from the committed file.
+
+| Circuit or gadget | Constraints |
+| --- | --- |
+| `PrimaryTransactionCircuit` | 17,318 |
+| `Hash2` | 217 |
+| `Hash3` | 241 |
+| `Hash4` | 265 |
+| `MerkleHash4`, one node | 283 |
+| `MerkleProofVerification`, 10 levels | 2,821 |
+| `HashAndAdd`, one plaintext | 265 |
+| `HashAndAdd`, two plaintexts | 265 |
+| `HashAndAdd`, three plaintexts | 529 |
+
+Each gadget is measured on a small wrapper circuit that also asserts the result equals a public input, so each gadget figure includes that one constraint. Ten Merkle levels cost 2,821, not ten times 283.
+
+The count is the same for every spend. Dummy inputs, messaging on or off, and either `auth_done` mode change only witness values, never the circuit's shape. Each conditional rule is a `Select` or a conditional equality, and every Merkle fold is computed whether or not its result is used.
+
+The snapshot also lists circuits built in `core-deploy/experiments`: `CompliantTransactionCircuit`, `OuterGroth16Circuit`, `OuterGroth16TwoProofCircuit` and `PrimaryChamberWrappingCircuit`. None has a proving key, a verifier or a contract path. They are not part of the protocol.
+
+## Proof system
+
+| Item | Value |
+| --- | --- |
+| Proof system | Groth16 |
+| Curve | BN254, the curve of the EVM's pairing precompiles |
+| Library | gnark v0.16.4 |
+| Public inputs | 14 |
+| Proof on-chain | Eight `uint256` words, 256 bytes, passed to `Chamber.handleZkp` as `uint256[8] proof` |
+
+Groth16 over BN254 is not post-quantum. The circuit does no elliptic-curve operations of its own: the curve is the proof system's.
+
+## Trusted setup
+
+The keys come from one run of gnark's BN254 Groth16 setup, `groth16_bn254.Setup` in `core/scripts/gen`. That is a single-party setup: no multi-party computation ceremony has been run for this circuit.
+
+Groth16 security rests on the setup's secret randomness being destroyed. Anyone who kept it could forge a proof for any public inputs, including a withdrawal, and the Chamber would accept it. With a single-party setup, users trust that one party.
+
+:::caution[Single-party development keys]
+The current keys are for development. The specification requires a multi-party ceremony before production. It is **Planned**, and runs once, on the final circuit version.
+:::
+
+## Artifacts
+
+`core-deploy/scripts/build.sh` builds every artifact from the circuit in one pass.
+
+| Artifact | Path |
+| --- | --- |
+| Constraint system, proving key | `core-deploy/dist/prover/cs`, `core-deploy/dist/prover/pk` |
+| Verifying key | `core-deploy/dist/vk.json` |
+| Solidity verifier | Exported by gnark, then committed as `core/contracts/src/ChamberVerifier.sol` |
+| End-to-end fixture | `core/testdata/e2e_fixture.json`, a real proof the Foundry suite verifies |
+| Constraint snapshot | `core/circuits/build/.constraint-snapshot` |
+| Prover WASM | `core-deploy/dist/mist.wasm`, which embeds the constraint system and proving key |
+
+`scripts/gen` skips the setup when the compiled constraint system matches the stored one byte for byte and the stored keys load, and reuses them. Otherwise it runs a new setup.
+
+## Changing the circuit
+
+- **`core/circuits/src` is frozen once deployed.** Any change to its constraints invalidates the keys, the verifier and the fixture. New circuits are built in `core-deploy/experiments`.
+- **Moving Go code can invalidate the proving key.** gnark records solver-hint function paths in the serialized constraint system. Renaming the package that defines `hintShouldSwap` changes those bytes, even with identical constraints. Every hint is registered in `gadgets.InitHints()`.
+- **A gnark upgrade changes the serialized constraint system, not the circuit.** The constraint system is re-serialized with the new gnark, the setup is skipped, and the verifier regenerates identically.
+- **A new verifier is not live when it is generated.** Regenerating `ChamberVerifier.sol` changes nothing on-chain. The Chamber owner proposes the new verifier, and it can go live only after a 7-day timelock. See [Contracts](/contracts/).
+
+The specification plans three circuit changes, each its own circuit version with its own setup and verifier: exit spends, then sequential identifiers, then a relayer fee leg. All three are **Planned**.
