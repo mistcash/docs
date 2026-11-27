@@ -1,0 +1,107 @@
+---
+title: Client and address book
+description: "MistClient configuration, the address book, and what each member of the chain adapter must return."
+sidebar:
+  order: 3
+---
+
+`MistClient` is a stateful gateway. The host injects the addresses, the chain transport, the prover and the key lookups, and the client turns them into deposits, spends, registrations and Reserve administration.
+
+## Address book
+
+```ts
+interface AddressBook {
+  chamber: Hex;
+  registrar: Hex;
+  reserve: Hex;
+  token: Hex;
+  verifier: Hex;
+}
+```
+
+This is the shape of `core-deploy/dist/deployments/<chainId>.json`, which `Deploy.s.sol` writes. Without dev fixtures, `reserve` and `token` are the zero address.
+
+| Field | Used for |
+| --- | --- |
+| `chamber` | Every Chamber call: deposits, spends, screening and tree reads |
+| `registrar` | `join` and `revokeRegistration`. The registrar holds `USERS` on each Reserve it serves |
+| `reserve` | The Reserve a script works with. Client methods take the Reserve as an argument |
+| `token` | The one asset a client deposits, spends and withdraws. Another asset needs another address book |
+| `verifier` | Held for reference. The client makes no call to it |
+
+## Configuration
+
+```ts
+new MistClient({ book, chainId, chain, prover, callbacks, store, secretOf, addressOf });
+```
+
+| Option | Type | Purpose |
+| --- | --- | --- |
+| `book` | `AddressBook` | The addresses above |
+| `chainId` | `number` or `string` | Bound into the proof's note hashes |
+| `chain` | `ChainAdapter` | Reads, writes and events |
+| `prover` | `ProverAdapter` | `hash2`, `spend` and, for `openPayload`, `decrypt` |
+| `callbacks` | `MistCallbacks` | Optional hooks, below |
+| `store` | `StorageAdapter` | Optional. Persists used key indices only |
+| `secretOf` | `(id) => string` | The MIST secret of an identity. Without it, a call that needs one throws `MistClient: secretOf not configured` |
+| `addressOf` | `(name) => Hex` | The address behind a public account name. Without it, a call that needs one throws `MistClient: addressOf not configured` |
+
+An identity is a name. `alice` is a public account, owned by its address. `alice (MIST)` is a private MIST identity, owned by a MIST Address derived from `secretOf`. [Notes and keys](/sdk/notes-and-keys/) covers both.
+
+The client's public state is `book`, `chainId`, `chain`, `prover`, `callbacks`, `store`, `notes`, `ukx` and `usedKeyIndices`.
+
+## Chain adapter
+
+```ts
+interface ChainAdapter {
+  readContract(address: Hex, functionName: string, args?: unknown[]): Promise<unknown>;
+  sendTransaction(tx: { to: Hex; data: Hex; value?: bigint }): Promise<SentTx>;
+  getEvents?(address: Hex, eventName: string, fromBlock?: bigint): Promise<Array<{ args: Record<string, unknown> }>>;
+}
+```
+
+| Member | Must return |
+| --- | --- |
+| `readContract` | The decoded result of a view call. Every function name the client reads is in `CORE_ABI` |
+| `sendTransaction` | `{ hash?, result?, receipt }` once the transaction is confirmed. `receipt` carries `transactionHash` and `logs`, and optionally `gasUsed` and `status` |
+| `getEvents` | Decoded events with `args`. Optional, but `queuedDeposits`, `registeredUserLeaves` and every `spend` at a Reserve with members need it |
+
+### sendTransaction
+
+The host owns signing, simulation, gas and waiting. The client calls `sendTransaction` for every write and never reads `receipt.status`, so an adapter throws when a transaction reverts. Otherwise the client records a membership or a spend that never happened.
+
+`receipt.logs` is required.
+
+- `deposit` reads its own `NoteAppended` or `DepositQueued` event from the logs. `spend` reads `NoteAppended`.
+- An adapter that cannot return logs returns the deposit call's `(noteHash, depositId)` as `result` instead.
+- With neither, `deposit` stops after the approve and before any funds move.
+- When one receipt carries several Chamber notes, as a bundled transaction does, `result` picks this deposit's note. Without a `result` in that case, `deposit` refuses to guess.
+
+The adapter also decides who submits. [Private transfers and withdrawals](/sdk/transfers/) shows a spend sent from a relayer account.
+
+### getEvents
+
+`getEvents` serves three events.
+
+- `UserRegistered` and `UserRemoved` on a Reserve, which build the users tree a spend proves against. A Reserve with members needs every one of them. `registeredUserLeaves` throws on a missing registration, and `spend` refuses before proving when it holds fewer leaves than the Reserve's `registeredUsersCount`.
+- `DepositQueued` on the Chamber, which `queuedDeposits` reads.
+
+## Callbacks
+
+| Hook | Fires | Use |
+| --- | --- | --- |
+| `onProgress(stage)` | At each stage: `Approving`, `Depositing`, `Exchanging keys`, `Registering`, `Proving in your browser`, `Relayer submitting` or `Submitting` | Progress display. The strings are for people, not for matching |
+| `onBeforeSend({ to, data, functionName })` | Before each `sendTransaction` | Return `false` to veto. The call throws `MistClient: send of <functionName> vetoed by onBeforeSend` |
+| `onTx({ functionName, receipt })` | After each confirmed write | Logging and fan-out |
+| `onProof({ kind: "spend", secs })` | After proving | Timing |
+
+## Storage adapter
+
+```ts
+interface StorageAdapter {
+  get(key: string): string | null | Promise<string | null>;
+  set(key: string, value: string): void | Promise<void>;
+}
+```
+
+`localStorage`, a `Map` wrapper or a database wrapper all fit. The client writes one key, `mist:keyIndices`. It does not store notes or key exchanges.
