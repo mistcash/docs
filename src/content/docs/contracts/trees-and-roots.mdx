@@ -17,7 +17,7 @@ Every note, deposited or created by a spend, is appended to `txArray` and to the
 
 - **Rollover.** The leaf at a global index divisible by the capacity opens a new tree. For every tree after the first, the Chamber emits `TxTreeOpened(treeId, firstIndex)`.
 - **Roots stay valid.** Every root any transactions tree has had is recorded in `merkleRoots` and never retired. A proof built against an older root still verifies after the tree has grown, and a note in a full tree stays spendable.
-- **One tree per spend.** A spend proves both inputs against one `transactions_root`, so two real notes in different trees cannot be spent together.
+- **One tree per spend.** A spend proves both inputs against one `transactions_root`, so two real notes in different trees cannot be spent together. To merge them, the owner first spends one note with a dummy second input, which lands its outputs in the current tree.
 - **A spend can straddle trees.** If `new_note_1` fills the last slot of a tree, `new_note_2` opens the next one.
 - **`NoteAppended(index, note, root)`** is emitted for every leaf, with `root` the new root of that leaf's tree.
 

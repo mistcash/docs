@@ -18,7 +18,7 @@ The Chamber is the state engine: it takes deposits, verifies each spend and appl
 | `SPEND_PAUSE_MAX` | 3 days | Length of one spend pause |
 | `SPEND_PAUSE_COOLDOWN` | 7 days | Minimum gap between the end of one spend pause and the next |
 
-The immutable `chamberId` is `H2(block.chainid, address(this))`, computed in the constructor. The constructor takes `(owner_, verifier_)` and reverts with `invalid verifier` if the verifier address has no code.
+The immutable `chamberId` is `H2(block.chainid, address(this))`, computed in the constructor. The constructor takes `(owner_, verifier_, guardian_)`. It reverts with `invalid verifier` if the verifier address has no code. A non-zero `guardian_` is set at once and emits `GuardianSet`; zero leaves the Chamber with no guardian until the owner sets one.
 
 ## Deposits
 
@@ -56,7 +56,7 @@ The note binds the received amount, so an asset that takes a fee on the incoming
 | No screener | The note is appended to the transactions tree at once and recorded in `assets` | `(noteHash, 0)` |
 | A screener | The deposit is queued under `depositId = ++depositCount`, and `DepositQueued` is emitted. The note stays out of the tree until the screener decides | `(noteHash, depositId)` |
 
-`refundTo` names who receives a reclaim. It cannot be zero (`Chamber: zero refundTo`). The four-argument form uses the depositor. A router that deposits for a user names the user, so a rejected deposit is never stranded behind a contract that cannot reclaim. `refundTo` matters only for a queued deposit.
+`refundTo` names who is refunded if the screener rejects the deposit. It cannot be zero (`Chamber: zero refundTo`). The four-argument form uses the depositor. A router that deposits for a user names the user, so a rejected deposit is never stranded behind a contract that cannot reclaim. `refundTo` matters only for a queued deposit, and a third party named there is paid only after the screener has seen the deposit.
 
 An owner commitment is single-use per Reserve, asset and amount. Once a note is in a tree, a second deposit with the same values gives the same note hash and reverts. At a screened Reserve, an identical deposit made while the first is still queued queues beside it, and approval admits only the first. Use a fresh blinding for every deposit.
 
@@ -68,6 +68,7 @@ A Reserve's screener is an off-chain service, such as a KYT bot or an API relaye
 function approveDeposits(uint256[] calldata depositIds, bytes32 evidence) external;
 function rejectDeposits(uint256[] calldata depositIds, bytes32 evidence) external;
 function reclaimDeposit(uint256 depositId) external;
+function setDepositRefundTo(uint256 depositId, address refundTo) external;
 function depositRefundTo(uint256 depositId) public view returns (address);
 ```
 
@@ -75,7 +76,8 @@ function depositRefundTo(uint256 depositId) public view returns (address);
 | --- | --- | --- |
 | `approveDeposits` | The screener of each deposit's Reserve | Appends each pending note and emits `DepositApproved`. A note already in a tree is rejected instead, with `DepositDuplicateRejected`. Ids that are not pending are skipped. Paused with inflows |
 | `rejectDeposits` | The same | Marks each pending deposit rejected and emits `DepositRejected`. Rejection is final. Never paused |
-| `reclaimDeposit` | The depositor or `refundTo` | Pays a pending or rejected deposit back to `depositRefundTo(id)`, which is `refundTo` if one was named and the depositor otherwise. Emits `DepositReclaimed`. Never paused |
+| `reclaimDeposit` | Pending: the depositor only. Rejected: the depositor or `refundTo` | A pending deposit returns to the depositor. A rejected one goes to `depositRefundTo(id)`, which is `refundTo` if one was named and the depositor otherwise. Emits `DepositReclaimed`. Never paused |
+| `setDepositRefundTo` | The depositor | Changes a pending deposit's `refundTo`, which cannot be zero, and emits `DepositRefundToSet`. Reverts with `Chamber: not pending` once the screener has decided |
 
 - **The screener is read at decision time.** A batch reverts with `Chamber: only reserve screener` if the caller is not the current screener of a pending deposit in it. A new screener therefore decides every deposit still waiting. With no screener set, waiting deposits can only be reclaimed.
 - **The queue is keyed by deposit id,** not by note hash. A note hash is public in the deposit calldata, so a hash-keyed queue would let anyone block a deposit by queueing the same note first. Duplicate notes may queue side by side, and approval admits only the first.
@@ -135,7 +137,7 @@ A registered Reserve updates its own record through four setters. Each acts on `
 | Setter | Called from | Effect |
 | --- | --- | --- |
 | `setReserveConfig(reserveConfig)` | `Reserve.updateAuditorKey` | Rewrites the Reserve's zkState leaf and makes the new zkState root current |
-| `setReserveStateRoot(stateRoot)` | `Reserve.addUser`, `Reserve.removeUser` | The same, with the new users root. When the users root first becomes non-zero, every superseded zkState root stops being accepted |
+| `setReserveStateRoot(stateRoot)` | `Reserve.addUser`, `Reserve.removeUser` | The same, with the new users root. When the users root first becomes non-zero, every superseded zkState root stops being accepted. A non-zero users root cannot return to zero (`Chamber: users root back to zero`) |
 | `setReserveScreener(screener)` | `Reserve.setScreener` | Sets or clears, with zero, the Reserve's screener |
 | `setReserveAssetMinDeposit(asset, minDeposit)` | `Reserve.setAssetMinDeposit` | Lists the asset with a minimum below 2^120, or delists it with zero |
 
@@ -150,7 +152,7 @@ A registered Reserve updates its own record through four setters. Each acts on `
 | `transactionsExist(notes)`, `noteIndexPlusOne(note)` | Whether each note was appended, and 1 plus a note's first global index (0 if never) |
 | `assetsFromNote(noteHash)` | `(amount, addr)` of a deposited note. Spend outputs have no entry |
 | `privateTxCommitments(privateTxKey)` | The record of a spend filed under that identifier |
-| `pendingDeposits(id)`, `depositCount()`, `depositRefundTo(id)` | Queued deposits and their reclaim recipient |
+| `pendingDeposits(id)`, `depositCount()`, `depositRefundTo(id)` | Queued deposits, and who a rejected deposit is refunded to |
 | `isRegisteredReserve(reserve)` | Whether this Chamber registered the address |
 | `spendsPaused()`, `spendPausedUntil()`, `inflowsPaused()`, `guardian()` | Pause state. See [Roles and security](/contracts/roles-and-security/) |
 

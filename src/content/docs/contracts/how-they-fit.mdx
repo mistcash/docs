@@ -60,7 +60,7 @@ Four contracts carry the protocol. The Chamber keeps the record and verifies spe
 | Reserve | Chamber | `setReserveScreener(screener)` | Registered Reserve, its own record |
 | Reserve | Chamber | `setReserveAssetMinDeposit(asset, minDeposit)` | Registered Reserve, its own record |
 | ManagerSigRegistrar | Reserve | `addUser(leaf)` | `USERS` permission |
-| ManagerSigRegistrar | Reserve | `registrations(leaf)`, `hasPermission(role, account)` | Views |
+| ManagerSigRegistrar | Reserve | `leafNonce(leaf)`, `permissionEpoch(role, account)`, `hasPermission(role, account)` | Views |
 | ManagerSigRegistrar | A `USERS` holder with code | `isValidSignature(digest, signature)` | ERC-1271 view |
 | Reserve | ERC-20 asset | `safeTransferFrom`, `safeTransfer`, `balanceOf` | The asset's own rules |
 
@@ -80,7 +80,7 @@ The four Chamber setters act on `msg.sender`'s record, and the Chamber accepts t
 
 5. The Chamber checks the received amount against 2^120 and the Reserve's minimum, and hashes the note over the received amount.
 
-6. Without a screener, the note is appended at once and `deposit` returns `(noteHash, 0)`. With one, the note is queued under a new deposit id and `deposit` returns `(noteHash, depositId)`. The screener later calls `approveDeposits` or `rejectDeposits`, and the depositor or `refundTo` can call `reclaimDeposit` while it is pending or rejected.
+6. Without a screener, the note is appended at once and `deposit` returns `(noteHash, 0)`. With one, the note is queued under a new deposit id and `deposit` returns `(noteHash, depositId)`. The screener later calls `approveDeposits` or `rejectDeposits`. The depositor can reclaim a pending deposit, and a rejected one is reclaimed to `refundTo`.
 
 </Steps>
 
@@ -106,7 +106,7 @@ The four Chamber setters act on `msg.sender`'s record, and the Chamber accepts t
 
 1. A member and the key holder agree a `userKeyExchange` off-chain. The member's leaf is `H2(owner, userKeyExchange)`.
 
-2. A `USERS` holder signs an EIP-712 `RegisterUser` message for the leaf, with a deadline.
+2. A `USERS` holder signs an EIP-712 `RegisterUser` message for the leaf that names itself as signer, with a deadline.
 
 3. Anyone calls `ManagerSigRegistrar.registerUser(reserve, leaf, deadline, signer, signature)`. The registrar checks the signature and the signer's permission and calls `Reserve.addUser(leaf)`.
 
